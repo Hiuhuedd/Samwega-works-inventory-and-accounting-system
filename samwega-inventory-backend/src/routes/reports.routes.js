@@ -52,11 +52,35 @@ router.get(
 );
 
 /**
+ * @route   GET /api/v1/reports/vehicle-inventory
+ * @desc    Get vehicle inventory report (Live View)
+ * @access  Admin, Store Manager
+ */
+router.get(
+    '/vehicle-inventory',
+    verifyToken,
+    requireRole('admin', 'store_manager'),
+    reportsController.getVehicleInventoryReport
+);
+
+/**
  * @route   POST /api/v1/reports/generate/sales-pdf
  * @desc    Generate sales report PDF
  * @access  Admin, Store Manager
  */
 router.post(
+    '/generate/sales-pdf',
+    verifyToken,
+    requireRole('admin', 'store_manager'),
+    reportsController.generateSalesPDF
+);
+
+/**
+ * @route   GET /api/v1/reports/generate/sales-pdf
+ * @desc    Generate sales report PDF (Download via browser)
+ * @access  Admin, Store Manager
+ */
+router.get(
     '/generate/sales-pdf',
     verifyToken,
     requireRole('admin', 'store_manager'),

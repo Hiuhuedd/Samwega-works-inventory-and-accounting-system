@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, CheckCircle2, Clock, Package, Truck, Printer, Receipt, Calendar, TrendingUp, AlertCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock, Package, Truck, Printer, Receipt, Calendar, TrendingUp, AlertCircle, FileText, Plus } from "lucide-react";
 import Link from "next/link";
 import api from "../../../lib/api";
 
@@ -91,15 +91,26 @@ export default function VehicleDetailsDashboard() {
     }
   };
 
-  const getPrice = (productName, unit) => {
+  const getPrice = (productName, unit, layerIndex) => {
     const item = inventory.find(i => i.productName === productName);
-    if (!item || !item.packagingStructure) return 0;
+    if (!item) return 0;
 
-    const layer = item.packagingStructure.find(l => l.unit === unit);
-    if (layer && layer.sellingPrice) return parseFloat(layer.sellingPrice);
+    // 1. Try exact layer index match (most reliable)
+    // Backend layers usually have sellingPrice
+    if (typeof layerIndex === 'number' && item.packagingStructure && item.packagingStructure[layerIndex]) {
+      const price = parseFloat(item.packagingStructure[layerIndex].sellingPrice);
+      if (price > 0) return price;
+    }
 
-    if (unit?.toLowerCase().includes("piece") || unit?.toLowerCase().includes("pc")) {
-      return parseFloat(item.sellingPricePerPiece) || 0;
+    // 2. Try unit name match (case-insensitive fuzzy match)
+    if (unit && item.packagingStructure) {
+      const layer = item.packagingStructure.find(l => l.unit?.toLowerCase() === unit.toLowerCase());
+      if (layer && layer.sellingPrice) return parseFloat(layer.sellingPrice);
+    }
+
+    // 3. Fallback for "pieces" or basic units
+    if (unit?.toLowerCase().includes("piece") || unit?.toLowerCase().includes("pc") || unit?.toLowerCase().includes("unit")) {
+      return parseFloat(item.sellingPricePerPiece || item.sellingPrice) || 0;
     }
 
     return 0;
@@ -117,7 +128,7 @@ export default function VehicleDetailsDashboard() {
       transfer.items.forEach(item => {
         if (item.layers) {
           item.layers.forEach(layer => {
-            const price = getPrice(item.productName, layer.unit);
+            const price = getPrice(item.productName, layer.unit, layer.layerIndex);
             const total = price * layer.quantity;
             acc.issued += total;
             if (layer.collected) {
@@ -159,25 +170,20 @@ export default function VehicleDetailsDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 font-sans">
-      <div className="mx-auto max-w-[1600px] space-y-6">
+    <>
+      <div className="space-y-6">
 
-        {/* Top Navigation & Controls */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
-          <div className="flex items-center gap-4">
-            <Link href="/vehicles" className="btn-ghost text-xs text-slate-600 hover:text-slate-900">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                {vehicle.vehicleName}
-                <span className="text-sm font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                  {vehicle.registrationNumber}
-                </span>
-              </h1>
-              <p className="text-xs text-slate-500">Sales Rep: {vehicle.salesTeamMember || "N/A"}</p>
-            </div>
+        {/* Standard Navigation Header */}
+        <div className="flex items-center justify-between gap-4 text-slate-900 mb-4 print:hidden">
+          <div>
+
+            <h1 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
+              {vehicle.vehicleName}
+              <span className="text-sm font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                {vehicle.registrationNumber}
+              </span>
+            </h1>
+            <p className="text-xs text-slate-500">Sales Rep: {vehicle.salesTeamMember || "N/A"}</p>
           </div>
 
           <div className="flex items-center gap-3">
@@ -283,7 +289,7 @@ export default function VehicleDetailsDashboard() {
                   <div className="divide-y divide-dashed divide-slate-100">
                     {transfer.items?.map((item) => (
                       item.layers?.map((layer, lIdx) => {
-                        const price = getPrice(item.productName, layer.unit);
+                        const price = getPrice(item.productName, layer.unit, layer.layerIndex !== undefined ? layer.layerIndex : lIdx);
                         const lineTotal = price * layer.quantity;
                         transferTotal += lineTotal;
 
@@ -348,6 +354,6 @@ export default function VehicleDetailsDashboard() {
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -11,21 +11,45 @@ import {
     ArrowDownRight,
     Banknote,
     Smartphone,
-    FileText
+    Landmark,
+    Clock,
+    Trash2,
+    Sparkles
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import api from "../../lib/api";
+import Header from "../../components/Header";
+import KKCalcModal from "../../components/KKCalcModal";
+
 
 export default function SalesDashboard() {
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
-
+    const router = useRouter();
     const [stats, setStats] = useState(null);
     const [sales, setSales] = useState([]);
     const [vehicles, setVehicles] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isKKModalOpen, setIsKKModalOpen] = useState(false);
 
     // Filters
     const [selectedVehicle, setSelectedVehicle] = useState("");
-    const [dateFilter, setDateFilter] = useState("");
+
+    // Date range filter (default last 30 days)
+    const getLast30Days = () => {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(start.getDate() - 30);
+        return {
+            start: start.toISOString().split('T')[0],
+            end: end.toISOString().split('T')[0]
+        };
+    };
+
+    const defaultRange = getLast30Days();
+    // Default to All Time (empty dates)
+    const [startDate, setStartDate] = useState("");
+    const [endDate, setEndDate] = useState("");
+
 
     useEffect(() => {
         fetchVehicles();
@@ -33,40 +57,113 @@ export default function SalesDashboard() {
 
     useEffect(() => {
         fetchData();
-    }, [selectedVehicle, dateFilter]);
+    }, [selectedVehicle, startDate, endDate]);
 
     const fetchVehicles = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/vehicles`);
-            if (res.ok) {
-                const data = await res.json();
-                setVehicles(data);
+            const response = await api.getVehicles();
+            // Backend returns { success: true, data: { vehicles: [...], pagination: {...} } }
+            if (response.success && response.data && Array.isArray(response.data.vehicles)) {
+                setVehicles(response.data.vehicles);
+            } else if (response.success && Array.isArray(response.data)) {
+                // Fallback in case structure changes
+                setVehicles(response.data);
+            } else {
+                setVehicles([]);
             }
         } catch (err) {
             console.error("Error fetching vehicles:", err);
+            setVehicles([]);
         }
+    };
+
+    // Helper function to convert Firestore timestamp to Date
+    const convertTimestamp = (timestamp) => {
+        if (!timestamp) return null;
+        // Handle Firestore Timestamp object
+        if (timestamp._seconds) {
+            return new Date(timestamp._seconds * 1000);
+        }
+        // Handle already converted date
+        if (timestamp instanceof Date) {
+            return timestamp;
+        }
+        // Handle string dates
+        if (typeof timestamp === 'string') {
+            return new Date(timestamp);
+        }
+        return null;
     };
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            const params = new URLSearchParams();
-            if (selectedVehicle) params.append("vehicleId", selectedVehicle);
-            if (dateFilter) params.append("date", dateFilter);
+            const filters = {};
+            if (startDate && endDate) {
+                filters.startDate = startDate;
+                filters.endDate = endDate;
+                filters.type = 'custom';
+            } else {
+                filters.type = 'all';
+            }
 
-            const [statsRes, salesRes] = await Promise.all([
-                fetch(`${API_BASE_URL}/api/sales/stats?${params}`),
-                fetch(`${API_BASE_URL}/api/sales?${params}&limit=50`)
+            if (selectedVehicle) filters.vehicleId = selectedVehicle;
+
+            // For stats, we need to aggregate all vehicles if no specific vehicle selected
+            // The backend expects vehicleId, so we'll fetch stats for the first vehicle or handle differently
+            let statsPromise;
+            if (selectedVehicle) {
+                statsPromise = api.getSalesStats(filters);
+            } else {
+                // When no vehicle selected, try to get stats without vehicleId filter
+                // or aggregate from all sales
+                statsPromise = api.getSalesStats(filters);
+            }
+
+            const [statsData, salesData] = await Promise.all([
+                statsPromise,
+                api.getSales({ ...filters, limit: 50 })
             ]);
 
-            if (statsRes.ok && salesRes.ok) {
-                const statsData = await statsRes.json();
-                const salesData = await salesRes.json();
-                setStats(statsData);
-                setSales(salesData);
+            console.log('=== STATS DEBUG ===');
+            console.log('Stats API Response:', statsData);
+            console.log('Stats Data:', statsData?.data);
+            console.log('Sales API Response:', salesData);
+            console.log('Number of sales returned:', salesData?.data?.sales?.length);
+            if (salesData?.data?.sales?.length > 0) {
+                console.log('First sale date:', salesData.data.sales[0].saleDate);
+                console.log('First sale grandTotal:', salesData.data.sales[0].grandTotal);
+                console.log('First sale paymentMethod:', salesData.data.sales[0].paymentMethod);
+            }
+
+            if (statsData.success && statsData.data) {
+                console.log('Setting stats to:', statsData.data);
+                setStats(statsData.data);
+            } else {
+                console.warn('Stats API failed, using defaults');
+                // Set default stats if API fails
+                setStats({
+                    totalRevenue: 0,
+                    totalTransactions: 0,
+                    totalItemsSold: 0,
+                    paymentMethods: { cash: 0, mpesa: 0, bank: 0, credit: 0, mixed: 0 }
+                });
+            }
+
+
+            if (salesData.success && salesData.data && Array.isArray(salesData.data.sales)) {
+                setSales(salesData.data.sales);
+            } else if (salesData.success && Array.isArray(salesData.data)) {
+                // Fallback in case structure changes
+                setSales(salesData.data);
+            } else {
+                setSales([]);
             }
         } catch (err) {
             console.error("Error fetching dashboard data:", err);
+            // Check if it's a token expiration error
+
+            setSales([]);
         } finally {
             setLoading(false);
         }
@@ -91,171 +188,220 @@ export default function SalesDashboard() {
     );
 
     return (
-        <div className="min-h-screen bg-slate-50 p-6 font-sans">
-            <div className="mx-auto max-w-[1600px] space-y-6">
+        <div className="min-h-screen bg-slate-50 font-sans">
+            <Header />
+            <div className="p-6">
+                <div className="mx-auto max-w-[1600px] space-y-6">
 
-                {/* Header */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                            <LayoutDashboard className="text-sky-600" />
-                            Sales Dashboard
-                        </h1>
-                        <p className="text-slate-500 text-sm mt-1">Overview of sales performance and transactions</p>
-                    </div>
+                    {/* Header */}
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+                                <LayoutDashboard className="text-sky-600" />
+                                Sales Dashboard
+                            </h1>
+                            <p className="text-slate-500 text-sm mt-1">Overview of sales performance and transactions</p>
+                        </div>
 
-                    <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
-                        <div className="relative">
-                            <Truck className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                            <select
-                                value={selectedVehicle}
-                                onChange={(e) => setSelectedVehicle(e.target.value)}
-                                className="pl-10 pr-8 py-2 bg-slate-50 border-none rounded-md text-sm text-slate-700 focus:ring-2 focus:ring-sky-500 outline-none appearance-none cursor-pointer hover:bg-slate-100 transition-colors"
-                            >
-                                <option value="">All Vehicles</option>
-                                {vehicles.map(v => (
-                                    <option key={v.id} value={v.id}>{v.vehicleName}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="h-8 w-px bg-slate-200"></div>
-                        <div className="relative">
-                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                            <input
-                                type="date"
-                                value={dateFilter}
-                                onChange={(e) => setDateFilter(e.target.value)}
-                                className="pl-10 pr-4 py-2 bg-slate-50 border-none rounded-md text-sm text-slate-700 focus:ring-2 focus:ring-sky-500 outline-none cursor-pointer hover:bg-slate-100 transition-colors"
-                            />
-                        </div>
-                        {(selectedVehicle || dateFilter) && (
+                        <div className="flex items-center gap-3">
                             <button
-                                onClick={() => { setSelectedVehicle(""); setDateFilter(""); }}
-                                className="text-xs text-rose-500 font-medium hover:text-rose-700 px-2"
+                                onClick={() => setIsKKModalOpen(true)}
+                                className="flex items-center gap-2 bg-rose-50 text-rose-600 px-4 py-2 rounded-lg font-medium hover:bg-rose-100 transition-colors border border-rose-200"
                             >
-                                Reset
+                                <Sparkles size={16} />
+                                Smart Delete
                             </button>
-                        )}
-                    </div>
-                </div>
 
-                {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <StatCard
-                        title="Total Revenue"
-                        value={`KSh ${stats?.totalRevenue?.toLocaleString() || 0}`}
-                        subValue={`${stats?.saleCount || 0} sales`}
-                        icon={Banknote}
-                        color="bg-sky-500"
-                    />
-                    <StatCard
-                        title="Cash Sales"
-                        value={`KSh ${stats?.paymentMethods?.cash?.toLocaleString() || 0}`}
-                        icon={Banknote}
-                        color="bg-emerald-500"
-                    />
-                    <StatCard
-                        title="M-Pesa Sales"
-                        value={`KSh ${stats?.paymentMethods?.mpesa?.toLocaleString() || 0}`}
-                        icon={Smartphone}
-                        color="bg-violet-500"
-                    />
-                    <StatCard
-                        title="Items Sold"
-                        value={stats?.totalItemsSold || 0}
-                        icon={FileText}
-                        color="bg-amber-500"
-                    />
-                </div>
-
-                {/* Sales Table */}
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-                        <h2 className="text-lg font-bold text-slate-900">Recent Transactions</h2>
-                        <div className="relative w-64">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                            <input
-                                type="text"
-                                placeholder="Search sales..."
-                                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-sky-500"
-                            />
+                            <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
+                                <div className="relative">
+                                    <Truck className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                    <select
+                                        value={selectedVehicle}
+                                        onChange={(e) => setSelectedVehicle(e.target.value)}
+                                        className="pl-10 pr-8 py-2 bg-slate-50 border-none rounded-md text-sm text-slate-700 focus:ring-2 focus:ring-sky-500 outline-none appearance-none cursor-pointer hover:bg-slate-100 transition-colors"
+                                    >
+                                        <option value="">All Vehicles</option>
+                                        {vehicles.map(v => (
+                                            <option key={v.id} value={v.id}>{v.vehicleName}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="h-8 w-px bg-slate-200"></div>
+                                <div className="flex items-center gap-2">
+                                    <div className="relative">
+                                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                        <input
+                                            type="date"
+                                            value={startDate}
+                                            onChange={(e) => setStartDate(e.target.value)}
+                                            className="pl-10 pr-4 py-2 bg-slate-50 border-none rounded-md text-sm text-slate-700 focus:ring-2 focus:ring-sky-500 outline-none cursor-pointer hover:bg-slate-100 transition-colors w-40"
+                                            placeholder="From"
+                                        />
+                                    </div>
+                                    <span className="text-slate-400 text-sm">to</span>
+                                    <div className="relative">
+                                        <input
+                                            type="date"
+                                            value={endDate}
+                                            onChange={(e) => setEndDate(e.target.value)}
+                                            className="pl-4 pr-4 py-2 bg-slate-50 border-none rounded-md text-sm text-slate-700 focus:ring-2 focus:ring-sky-500 outline-none cursor-pointer hover:bg-slate-100 transition-colors w-40"
+                                            placeholder="To"
+                                        />
+                                    </div>
+                                </div>
+                                {(selectedVehicle || startDate || endDate) && (
+                                    <button
+                                        onClick={() => {
+                                            setSelectedVehicle("");
+                                            const reset = getLast30Days();
+                                            setStartDate(reset.start);
+                                            setEndDate(reset.end);
+                                        }}
+                                        className="text-xs text-rose-500 font-medium hover:text-rose-700 px-2"
+                                    >
+                                        Reset
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
 
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
-                                <tr>
-                                    <th className="px-6 py-4">Receipt ID</th>
-                                    <th className="px-6 py-4">Date & Time</th>
-                                    <th className="px-6 py-4">Vehicle</th>
-                                    <th className="px-6 py-4">Items</th>
-                                    <th className="px-6 py-4">Payment</th>
-                                    <th className="px-6 py-4 text-right">Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {loading ? (
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                        <StatCard
+                            title="Total Revenue"
+                            value={`KSh ${stats?.totalRevenue?.toLocaleString() || 0}`}
+                            subValue={`${stats?.saleCount || 0} sales`}
+                            icon={Banknote}
+                            color="bg-sky-500"
+                        />
+                        <StatCard
+                            title="Cash Sales"
+                            value={`KSh ${stats?.paymentMethods?.cash?.toLocaleString() || 0}`}
+                            icon={Banknote}
+                            color="bg-emerald-500"
+                        />
+                        <StatCard
+                            title="M-Pesa Sales"
+                            value={`KSh ${stats?.paymentMethods?.mpesa?.toLocaleString() || 0}`}
+                            icon={Smartphone}
+                            color="bg-violet-500"
+                        />
+                        <StatCard
+                            title="Bank Sales"
+                            value={`KSh ${stats?.paymentMethods?.bank?.toLocaleString() || 0}`}
+                            icon={Landmark}
+                            color="bg-blue-500"
+                        />
+                        <StatCard
+                            title="Debt Sales"
+                            value={`KSh ${stats?.paymentMethods?.credit?.toLocaleString() || 0}`}
+                            icon={Clock}
+                            color="bg-amber-500"
+                        />
+                    </div>
+
+                    {/* Sales Table */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="p-6 border-b border-slate-200 flex justify-between items-center">
+                            <h2 className="text-lg font-bold text-slate-900">Recent Transactions</h2>
+                            <div className="relative w-64">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                <input
+                                    type="text"
+                                    placeholder="Search sales..."
+                                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-sky-500"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
                                     <tr>
-                                        <td colSpan="6" className="px-6 py-12 text-center text-slate-500">
-                                            Loading sales data...
-                                        </td>
+                                        <th className="px-6 py-4">Receipt ID</th>
+                                        <th className="px-6 py-4">Date & Time</th>
+                                        <th className="px-6 py-4">Vehicle</th>
+                                        <th className="px-6 py-4">Items</th>
+                                        <th className="px-6 py-4">Payment</th>
+                                        <th className="px-6 py-4 text-right">Amount</th>
                                     </tr>
-                                ) : sales.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="6" className="px-6 py-12 text-center text-slate-500">
-                                            No sales found matching your filters.
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    sales.map((sale) => {
-                                        const vehicle = vehicles.find(v => v.id === sale.vehicleId);
-                                        return (
-                                            <tr key={sale.id} className="hover:bg-slate-50 transition-colors">
-                                                <td className="px-6 py-4 font-mono text-slate-600">
-                                                    #{sale.id.substring(0, 8)}
-                                                </td>
-                                                <td className="px-6 py-4 text-slate-900">
-                                                    <div className="font-medium">{sale.date}</div>
-                                                    <div className="text-xs text-slate-500">
-                                                        {new Date(sale.soldAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-2">
-                                                        <Truck size={14} className="text-slate-400" />
-                                                        <span className="text-slate-700">
-                                                            {vehicle ? vehicle.vehicleName : 'Unknown Vehicle'}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <div className="text-slate-700">
-                                                        {sale.items.length} items
-                                                    </div>
-                                                    <div className="text-xs text-slate-500 truncate max-w-[200px]" title={sale.items.map(i => i.productName).join(', ')}>
-                                                        {sale.items[0]?.productName} {sale.items.length > 1 && `+${sale.items.length - 1} more`}
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {loading ? (
+                                        <tr>
+                                            <td colSpan="6" className="px-6 py-12 text-center text-slate-500">
+                                                Loading sales data...
+                                            </td>
+                                        </tr>
+                                    ) : sales.length === 0 ? (
+                                        <tr>
+                                            <td colSpan="6" className="px-6 py-12 text-center text-slate-500">
+                                                No sales found matching your filters.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        sales.map((sale) => {
+                                            const vehicle = vehicles.find(v => v.id === sale.vehicleId);
+                                            return (
+                                                <tr
+                                                    key={sale.id}
+                                                    onClick={() => router.push(`/sales/${sale.id}`)}
+                                                    className="hover:bg-slate-50 transition-colors cursor-pointer"
+                                                >
+                                                    <td className="px-6 py-4 font-mono text-slate-600">
+                                                        #{sale.id.substring(0, 8)}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-slate-900">
+                                                        <div className="font-medium">
+                                                            {convertTimestamp(sale.saleDate)?.toLocaleDateString() || 'N/A'}
+                                                        </div>
+                                                        <div className="text-xs text-slate-500">
+                                                            {convertTimestamp(sale.saleDate)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || ''}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <Truck size={14} className="text-slate-400" />
+                                                            <span className="text-slate-700">
+                                                                {vehicle ? vehicle.vehicleName : 'Unknown Vehicle'}
+                                                            </span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="text-slate-700">
+                                                            {sale.items.length} items
+                                                        </div>
+                                                        <div className="text-xs text-slate-500 truncate max-w-[200px]" title={sale.items.map(i => i.productName).join(', ')}>
+                                                            {sale.items[0]?.productName} {sale.items.length > 1 && `+${sale.items.length - 1} more`}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
                                                         ${sale.paymentMethod === 'cash' ? 'bg-emerald-100 text-emerald-800' :
-                                                            sale.paymentMethod === 'mpesa' ? 'bg-violet-100 text-violet-800' :
-                                                                'bg-amber-100 text-amber-800'}`}>
-                                                        {sale.paymentMethod}
-                                                    </span>
-                                                </td>
-                                                <td className="px-6 py-4 text-right font-bold text-slate-900">
-                                                    KSh {parseFloat(sale.totalAmount).toLocaleString()}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })
-                                )}
-                            </tbody>
-                        </table>
+                                                                sale.paymentMethod === 'mpesa' ? 'bg-violet-100 text-violet-800' :
+                                                                    'bg-amber-100 text-amber-800'}`}>
+                                                            {sale.paymentMethod}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right font-bold text-slate-900">
+                                                        KSh {parseFloat(sale.grandTotal).toLocaleString()}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
+
+                <KKCalcModal
+                    isOpen={isKKModalOpen}
+                    onClose={() => setIsKKModalOpen(false)}
+                    onSuccess={fetchData}
+                />
             </div>
         </div>
     );

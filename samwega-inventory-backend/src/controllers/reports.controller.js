@@ -1,4 +1,5 @@
 const reportsService = require('../services/reports.service');
+const vehicleReportService = require('../services/vehicle-report.service');
 const { successResponse } = require('../utils/response');
 const logger = require('../utils/logger');
 const pdfService = require('../services/pdf.service');
@@ -12,6 +13,20 @@ const sendPDFDownload = (res, pdfBuffer, filename) => {
     res.setHeader('Content-Length', pdfBuffer.length);
     res.send(pdfBuffer);
 };
+
+/**
+ * Get Vehicle Inventory Report (Live View)
+ */
+const getVehicleInventoryReport = async (req, res, next) => {
+    try {
+        const report = await vehicleReportService.getVehicleInventoryReport(req.query);
+        res.json(successResponse(report, 'Vehicle inventory report retrieved successfully'));
+    } catch (error) {
+        logger.error('Get vehicle inventory report controller error:', error);
+        next(error);
+    }
+};
+
 
 /**
  * Get sales report
@@ -73,10 +88,26 @@ const getPaymentMethodReport = async (req, res, next) => {
  */
 const generateSalesPDF = async (req, res, next) => {
     try {
-        const { startDate, endDate } = req.body;
-        const reportData = await reportsService.generateComprehensiveSalesReport(startDate, endDate);
-        const pdfBuffer = await pdfService.generateSalesReportPDF(reportData);
-        const reportName = `sales-report-${startDate}-${endDate}-${Date.now()}.pdf`;
+        const { startDate, endDate, type } = { ...req.body, ...req.query };
+
+        let pdfBuffer;
+        if (type === 'detailed') {
+            // Get raw sales data for detailed report
+            const salesReport = await reportsService.getSalesReport({ startDate, endDate, groupBy: null });
+            // The getSalesReport returns { sales: [...], summary: ... }
+            // We pass the whole object but flatten sales in the PDF service
+            const reportData = {
+                startDate,
+                endDate,
+                sales: salesReport.sales
+            };
+            pdfBuffer = await pdfService.generateDetailedSalesReportPDF(reportData);
+        } else {
+            const reportData = await reportsService.generateComprehensiveSalesReport(startDate, endDate);
+            pdfBuffer = await pdfService.generateSalesReportPDF(reportData);
+        }
+
+        const reportName = `sales-report-${type || 'summary'}-${startDate}-${endDate}-${Date.now()}.pdf`;
         sendPDFDownload(res, pdfBuffer, reportName);
     } catch (error) {
         logger.error('Generate sales PDF controller error:', error);
@@ -275,5 +306,7 @@ module.exports = {
     generateStockMovementPDF,
     generateInventoryTurnoverPDF,
     generateEnhancedVehicleInventoryPDF,
-    generateSupplierPerformancePDF
+    generateEnhancedVehicleInventoryPDF,
+    generateSupplierPerformancePDF,
+    getVehicleInventoryReport
 };

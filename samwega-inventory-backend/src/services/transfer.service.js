@@ -18,6 +18,45 @@ class TransferService {
     }
 
     /**
+     * Calculate multiplier for a given layer index based on packaging structure
+     * @param {Object|Array} structure
+     * @param {number} layerIndex
+     * @returns {number}
+     */
+    calculateMultiplier(structure, layerIndex) {
+        if (!structure) return 1;
+
+        // Handle Array Format (New)
+        if (Array.isArray(structure)) {
+            // If requesting a layer outside bounds, return 1 (base)
+            if (layerIndex >= structure.length) return 1;
+
+            let multiplier = 1;
+            // Multiplying the 'qty' of all SUBSEQUENT layers
+            // structure[i].qty is "how many units of layer i make 1 unit of layer i-1"
+            // But for multiplier relative to base unit (last layer), we cascade down.
+            // Layer 0 (Carton) -> contains structure[1].qty Boxes. Each Box contains structure[2].qty Pieces.
+            // So Multiplier = structure[1].qty * structure[2].qty * ...
+
+            for (let i = layerIndex + 1; i < structure.length; i++) {
+                multiplier *= (structure[i].qty || 1);
+            }
+            return multiplier;
+        }
+
+        // Handle Object Format (Legacy)
+        let multiplier = 1;
+        if (layerIndex === 0) {
+            // Carton
+            multiplier = (structure.cartonSize || 1) * (structure.packetSize || 1);
+        } else if (layerIndex === 1) {
+            // Box/Packet
+            multiplier = structure.packetSize || 1;
+        }
+        return multiplier;
+    }
+
+    /**
      * Generate transfer number
      * @returns {Promise<string>}
      */
@@ -73,15 +112,7 @@ class TransferService {
                 for (const layer of item.layers) {
                     // Convert to base units (pieces) for validation
                     const packagingStructure = inventoryItem.packagingStructure || {};
-                    let multiplier = 1;
-
-                    if (layer.layerIndex === 0) {
-                        // Carton
-                        multiplier = (packagingStructure.cartonSize || 1) * (packagingStructure.packetSize || 1);
-                    } else if (layer.layerIndex === 1) {
-                        // Box/Packet
-                        multiplier = packagingStructure.packetSize || 1;
-                    }
+                    const multiplier = this.calculateMultiplier(packagingStructure, layer.layerIndex);
 
                     totalNeeded += layer.quantity * multiplier;
                 }
@@ -214,16 +245,7 @@ class TransferService {
                     // Calculate total quantity to deduct (in base units)
                     let totalToDeduct = 0;
                     for (const layer of item.layers) {
-                        let multiplier = 1;
-
-                        if (layer.layerIndex === 0) {
-                            // Carton
-                            multiplier = (packagingStructure.cartonSize || 1) * (packagingStructure.packetSize || 1);
-                        } else if (layer.layerIndex === 1) {
-                            // Box/Packet
-                            multiplier = packagingStructure.packetSize || 1;
-                        }
-
+                        const multiplier = this.calculateMultiplier(packagingStructure, layer.layerIndex);
                         totalToDeduct += layer.quantity * multiplier;
                     }
 
@@ -253,9 +275,11 @@ class TransferService {
                                 layerIndex: layer.layerIndex,
                                 unit: layer.unit,
                                 quantity: layer.quantity,
-                                unitsPerParent: layer.layerIndex === 0 ? null :
-                                    layer.layerIndex === 1 ? packagingStructure.cartonSize :
-                                        packagingStructure.packetSize
+                                unitsPerParent: Array.isArray(packagingStructure) && packagingStructure[layer.layerIndex + 1]
+                                    ? packagingStructure[layer.layerIndex + 1].qty
+                                    : (layer.layerIndex === 0 ? null :
+                                        layer.layerIndex === 1 ? packagingStructure.cartonSize :
+                                            packagingStructure.packetSize)
                             })),
                             lastUpdated: admin.firestore.FieldValue.serverTimestamp()
                         });
@@ -276,9 +300,11 @@ class TransferService {
                                     layerIndex: newLayer.layerIndex,
                                     unit: newLayer.unit,
                                     quantity: newLayer.quantity,
-                                    unitsPerParent: newLayer.layerIndex === 0 ? null :
-                                        newLayer.layerIndex === 1 ? packagingStructure.cartonSize :
-                                            packagingStructure.packetSize
+                                    unitsPerParent: Array.isArray(packagingStructure) && packagingStructure[newLayer.layerIndex + 1]
+                                        ? packagingStructure[newLayer.layerIndex + 1].qty
+                                        : (newLayer.layerIndex === 0 ? null :
+                                            newLayer.layerIndex === 1 ? packagingStructure.cartonSize :
+                                                packagingStructure.packetSize)
                                 });
                             }
                         }
@@ -496,8 +522,15 @@ class TransferService {
                             logger.warn(`Could not fetch selling price for ${invData.inventoryId}`, err);
                         }
 
-                        // Sum up all layers' value
-                        const itemTotalQty = layers.reduce((sum, layer) => sum + (layer.quantity || 0), 0);
+                        // Sum up all layers' value (weighted by pieces per layer)
+                        let itemTotalQty = 0;
+                        const packagingStructure = (await this.db.collection('inventory').doc(invData.inventoryId).get()).data()?.packagingStructure;
+
+                        for (const layer of layers) {
+                            const multiplier = this.calculateMultiplier(packagingStructure, layer.layerIndex);
+                            itemTotalQty += (layer.quantity || 0) * multiplier;
+                        }
+
                         totalInventoryValue += itemTotalQty * sellingPrice;
                     }
 
@@ -554,17 +587,9 @@ class TransferService {
             const packagingStructure = inventoryItem.packagingStructure || {};
 
             // Calculate conversion rate
-            let conversionRate = 1;
-            if (fromLayer === 0 && toLayer === 1) {
-                // Carton to Box
-                conversionRate = packagingStructure.cartonSize || 12;
-            } else if (fromLayer === 0 && toLayer === 2) {
-                // Carton to Piece
-                conversionRate = (packagingStructure.cartonSize || 12) * (packagingStructure.packetSize || 6);
-            } else if (fromLayer === 1 && toLayer === 2) {
-                // Box to Piece
-                conversionRate = packagingStructure.packetSize || 6;
-            }
+            const fromMultiplier = this.calculateMultiplier(packagingStructure, fromLayer);
+            const toMultiplier = this.calculateMultiplier(packagingStructure, toLayer);
+            const conversionRate = Math.floor(fromMultiplier / toMultiplier) || 1;
 
             const resultingQuantity = quantity * conversionRate;
 
@@ -609,9 +634,11 @@ class TransferService {
                         layerIndex: toLayer,
                         unit: toLayer === 0 ? 'carton' : toLayer === 1 ? 'box' : 'piece',
                         quantity: resultingQuantity,
-                        unitsPerParent: toLayer === 0 ? null :
-                            toLayer === 1 ? packagingStructure.cartonSize :
-                                packagingStructure.packetSize
+                        unitsPerParent: Array.isArray(packagingStructure) && packagingStructure[toLayer + 1]
+                            ? packagingStructure[toLayer + 1].qty
+                            : (toLayer === 0 ? null :
+                                toLayer === 1 ? packagingStructure.cartonSize :
+                                    packagingStructure.packetSize)
                     });
                 }
 

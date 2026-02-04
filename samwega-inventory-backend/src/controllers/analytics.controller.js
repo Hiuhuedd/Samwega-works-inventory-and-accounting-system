@@ -80,11 +80,27 @@ const getProfitAnalytics = async (req, res) => {
     }
 };
 
+/**
+ * Get accounting stats
+ */
+const getAccountingStats = async (req, res) => {
+    try {
+        logger.info('Controller: calling getAccountingStats service...');
+        const analytics = await analyticsService.getAccountingStats(req.query);
+        logger.info('Controller: service returned. Sending response...');
+        return res.status(200).json(successResponse(analytics, 'Accounting stats retrieved successfully'));
+    } catch (error) {
+        logger.error('Get accounting stats controller error:', error);
+        return res.status(500).json(errorResponse(error.message, error));
+    }
+};
+
 module.exports = {
     getDashboardOverview,
     getSalesAnalytics,
     getInventoryAnalytics,
     getVehicleAnalytics,
     getSalesRepAnalytics,
-    getProfitAnalytics
+    getProfitAnalytics,
+    getAccountingStats
 };

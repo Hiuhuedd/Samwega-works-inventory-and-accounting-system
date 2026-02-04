@@ -99,6 +99,13 @@ export default function AddEditItem({ item }) {
         }))
         : [];
 
+      // Sort by creation date (newest first)
+      invoicesWithSuppliers.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0);
+        const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0);
+        return dateB - dateA;
+      });
+
       setInvoices(invoicesWithSuppliers);
 
       // If editing, find the selected invoice
@@ -249,9 +256,11 @@ export default function AddEditItem({ item }) {
               <option value="">
                 {loadingInvoices ? "Loading invoices..." : "Select an invoice..."}
               </option>
-              {invoices.map((inv) => (
+              {invoices.map((inv, index) => (
                 <option key={inv.id} value={inv.id}>
                   {inv.invoiceNumber || inv.id} - {inv.supplierName || inv.supplier?.name || "Unknown Supplier"}
+                  {inv.totalAmount ? ` - KES ${inv.totalAmount.toLocaleString()}` : ''}
+                  {index === 0 ? ' [NEWEST]' : ''}
                 </option>
               ))}
             </select>

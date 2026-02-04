@@ -116,4 +116,30 @@ router.post(
     salesController.voidSale
 );
 
+/**
+ * @route   POST /api/v1/sales/find-combination
+ * @desc    Find sales combination matching amount
+ * @access  Admin, Store Manager only
+ */
+router.post(
+    '/find-combination',
+    verifyToken,
+    requireRole('admin', 'store_manager'),
+    validateBody(require('../validators/sales.validator').findCombinationSchema),
+    salesController.findCombination
+);
+
+/**
+ * @route   POST /api/v1/sales/delete-batch
+ * @desc    Delete batch of sales
+ * @access  Admin only
+ */
+router.post(
+    '/delete-batch',
+    verifyToken,
+    requireRole('admin'),
+    validateBody(require('../validators/sales.validator').deleteBatchSchema),
+    salesController.deleteBatch
+);
+
 module.exports = router;

@@ -75,4 +75,16 @@ router.get(
     analyticsController.getProfitAnalytics
 );
 
+/**
+ * @route   GET /api/v1/analytics/accounting
+ * @desc    Get accounting dashboard stats
+ * @access  Admin only
+ */
+router.get(
+    '/accounting',
+    verifyToken,
+    requireRole('admin'),
+    analyticsController.getAccountingStats
+);
+
 module.exports = router;

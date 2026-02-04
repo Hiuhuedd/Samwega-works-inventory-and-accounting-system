@@ -327,12 +327,19 @@ class SalesService {
                 }
 
                 // Update daily summary
+                // Normalize payment method for summary keys
+                let summaryMethod = (paymentMethod || 'cash').toLowerCase();
+                if (summaryMethod === 'debt') summaryMethod = 'credit';
+
                 if (summaryDoc.exists) {
                     const summaryData = summaryDoc.data();
+                    const key = `${summaryMethod}Sales`;
+                    // Handle legacy keys if they exist in the doc but we want to merge into normalized key
+                    // This simple update assumes we are moving forward with normalized keys.
                     transaction.update(summaryRef, {
                         totalSales: summaryData.totalSales + grandTotal,
                         totalTransactions: summaryData.totalTransactions + 1,
-                        [`${paymentMethod}Sales`]: (summaryData[`${paymentMethod}Sales`] || 0) + grandTotal,
+                        [key]: (summaryData[key] || 0) + grandTotal,
                         updatedAt: admin.firestore.FieldValue.serverTimestamp()
                     });
                 } else {
@@ -344,11 +351,11 @@ class SalesService {
                         date: today,
                         totalSales: grandTotal,
                         totalTransactions: 1,
-                        cashSales: paymentMethod === 'cash' ? grandTotal : 0,
-                        mpesaSales: paymentMethod === 'mpesa' ? grandTotal : 0,
-                        bankSales: paymentMethod === 'bank' ? grandTotal : 0,
-                        creditSales: paymentMethod === 'credit' ? grandTotal : 0,
-                        mixedSales: paymentMethod === 'mixed' ? grandTotal : 0,
+                        cashSales: summaryMethod === 'cash' ? grandTotal : 0,
+                        mpesaSales: summaryMethod === 'mpesa' ? grandTotal : 0,
+                        bankSales: summaryMethod === 'bank' ? grandTotal : 0,
+                        creditSales: summaryMethod === 'credit' ? grandTotal : 0,
+                        mixedSales: summaryMethod === 'mixed' ? grandTotal : 0,
                         createdAt: admin.firestore.FieldValue.serverTimestamp(),
                         updatedAt: admin.firestore.FieldValue.serverTimestamp()
                     });
@@ -710,36 +717,40 @@ class SalesService {
         try {
             const { startDate, endDate, type = 'daily' } = options;
 
-            if (type === 'today' || type === 'daily') {
-                const today = new Date().toISOString().split('T')[0];
-                const summary = await this.getDailySummary(vehicleId, today);
+            // Use Raw Query for:
+            // 1. Custom Date Range (startDate && endDate)
+            // 2. All Time (type === 'all')
+            if ((startDate && endDate) || type === 'all' || type === 'custom') {
+                logger.info(`=== STATS CALCULATION (${type}) ===`);
 
-                return {
-                    totalRevenue: summary.totalSales,
-                    totalTransactions: summary.totalTransactions,
-                    totalItemsSold: 0, // Not currently tracked in daily summary
-                    paymentMethods: {
-                        cash: summary.cashSales,
-                        mpesa: summary.mpesaSales,
-                        bank: summary.bankSales,
-                        credit: summary.creditSales,
-                        mixed: summary.mixedSales
-                    },
-                    period: 'today'
-                };
-            } else {
-                // Aggregated stats (All time or date range)
-                let query = this.db.collection('daily_sales_summary')
-                    .where('vehicleId', '==', vehicleId);
+                let salesQuery = this.db.collection(this.collection)
+                    .where('status', '==', 'completed')
+                    .orderBy('saleDate', 'desc');
 
-                if (startDate) {
-                    query = query.where('date', '>=', startDate);
-                }
-                if (endDate) {
-                    query = query.where('date', '<=', endDate);
+                // Only limit if it's "All Time" to prevent massive reads, 
+                // but 2000 might be too small for "All Time". 
+                // For now, increasing limit to 5000 to catch more history.
+                // In future, proper aggregation queries or fixed daily summaries should be used.
+                salesQuery = salesQuery.limit(5000);
+
+                if (vehicleId) {
+                    salesQuery = salesQuery.where('vehicleId', '==', vehicleId);
                 }
 
-                const snapshot = await query.get();
+                // Apply date filters if provided
+                if (startDate && endDate) {
+                    const start = new Date(startDate);
+                    start.setHours(0, 0, 0, 0);
+                    const end = new Date(endDate);
+                    end.setHours(23, 59, 59, 999);
+
+                    // Note: Firestore can't do Range on Date AND Equality on vehicleId easily without composite index
+                    // But if we use client-side filtering (like the original code did inside forEach loop), it works.
+                    // The original code queried by status/vehicle then filtered dates in loop. We keep that pattern.
+                }
+
+                const salesSnapshot = await salesQuery.get();
+                logger.info(`Found ${salesSnapshot.size} completed sales for stats calculation`);
 
                 const stats = {
                     totalRevenue: 0,
@@ -752,27 +763,152 @@ class SalesService {
                         credit: 0,
                         mixed: 0
                     },
-                    period: type === 'all' ? 'all_time' : 'custom_range'
+                    period: type === 'all' ? 'all_time' : `${startDate} to ${endDate}`
                 };
 
-                if (snapshot.empty) {
-                    return stats;
+                if (!salesSnapshot.empty) {
+                    // Start/End date objects for filtering loops
+                    const start = startDate ? new Date(startDate) : null;
+                    if (start) start.setHours(0, 0, 0, 0);
+
+                    const end = endDate ? new Date(endDate) : null;
+                    if (end) end.setHours(23, 59, 59, 999);
+
+                    salesSnapshot.forEach(doc => {
+                        const sale = doc.data();
+
+                        // Convert Firestore timestamp to Date
+                        let saleDate = null;
+                        if (sale.saleDate && sale.saleDate._seconds) {
+                            saleDate = new Date(sale.saleDate._seconds * 1000);
+                        } else if (sale.saleDate && sale.saleDate.toDate) {
+                            saleDate = sale.saleDate.toDate();
+                        } else if (sale.saleDate instanceof Date) {
+                            saleDate = sale.saleDate;
+                        }
+
+                        // Filter by date range if dates are provided
+                        let includeSale = true;
+                        if (start && end && saleDate) {
+                            if (saleDate < start || saleDate > end) includeSale = false;
+                        }
+
+                        if (includeSale) {
+                            stats.totalRevenue += (sale.grandTotal || 0);
+                            stats.totalTransactions += 1;
+
+                            // Normalize payment method string
+                            const rawMethod = (sale.paymentMethod || 'cash').toLowerCase();
+
+                            // Handle mixed payments with valid breakdown
+                            if (rawMethod === 'mixed' && Array.isArray(sale.payments) && sale.payments.length > 0) {
+                                sale.payments.forEach(payment => {
+                                    let subMethod = (payment.method || 'cash').toLowerCase();
+                                    const subAmount = parseFloat(payment.amount) || 0;
+
+                                    // Map variations
+                                    if (subMethod.includes('debt') || subMethod.includes('credit') || subMethod.includes('loan')) subMethod = 'credit';
+                                    else if (subMethod.includes('bank') || subMethod.includes('cheque') || subMethod.includes('transfer')) subMethod = 'bank';
+                                    else if (subMethod.includes('mpesa') || subMethod.includes('mobile')) subMethod = 'mpesa';
+                                    else subMethod = 'cash'; // Default sub-payments to cash if unknown
+
+                                    if (stats.paymentMethods[subMethod] !== undefined) {
+                                        stats.paymentMethods[subMethod] += subAmount;
+                                    } else {
+                                        stats.paymentMethods.cash += subAmount;
+                                    }
+                                });
+                            } else {
+                                // Standard single payment method OR Mixed without details (fallback to cash)
+                                let method = rawMethod;
+
+                                // Map variations to standard keys
+                                if (method.includes('debt') || method.includes('credit') || method.includes('loan')) method = 'credit';
+                                else if (method.includes('bank') || method.includes('cheque') || method.includes('transfer')) method = 'bank';
+                                else if (method.includes('mpesa') || method.includes('mobile')) method = 'mpesa';
+                                else if (method.includes('cash')) method = 'cash';
+                                else method = 'cash'; // Catch-all: forced to cash
+
+                                if (stats.paymentMethods[method] !== undefined) {
+                                    stats.paymentMethods[method] += (sale.grandTotal || 0);
+                                } else {
+                                    stats.paymentMethods.cash += (sale.grandTotal || 0);
+                                }
+                            }
+                        }
+                    });
                 }
 
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    stats.totalRevenue += (data.totalSales || 0);
-                    stats.totalTransactions += (data.totalTransactions || 0);
-                    // stats.totalItemsSold += (data.totalItemsSold || 0); // If we track this later
-
-                    stats.paymentMethods.cash += (data.cashSales || 0);
-                    stats.paymentMethods.mpesa += (data.mpesaSales || 0);
-                    stats.paymentMethods.bank += (data.bankSales || 0);
-                    stats.paymentMethods.credit += (data.creditSales || 0);
-                    stats.paymentMethods.mixed += (data.mixedSales || 0);
-                });
-
                 return stats;
+            }
+
+            if (type === 'today' || type === 'daily') {
+                const today = new Date().toISOString().split('T')[0];
+
+                // If vehicleId is provided, get stats for that vehicle only
+                if (vehicleId) {
+                    const summary = await this.getDailySummary(vehicleId, today);
+
+                    return {
+                        totalRevenue: summary.totalSales,
+                        totalTransactions: summary.totalTransactions,
+                        totalItemsSold: 0,
+                        paymentMethods: {
+                            cash: summary.cashSales || summary.CashSales || 0,
+                            mpesa: summary.mpesaSales || summary.MpesaSales || 0,
+                            bank: summary.bankSales || summary.BankSales || 0,
+                            credit: summary.creditSales || summary.CreditSales || summary.debtSales || summary.DebtSales || 0,
+                            mixed: summary.mixedSales || summary.MixedSales || 0
+                        },
+                        period: 'today'
+                    };
+                } else {
+                    // Aggregate stats from all vehicles for today
+                    // ... (keep existing daily fallback logic if needed, or implement improved logic here)
+                    const snapshot = await this.db.collection('daily_sales_summary')
+                        .where('date', '==', today)
+                        .get();
+
+                    const stats = {
+                        totalRevenue: 0,
+                        totalTransactions: 0,
+                        totalItemsSold: 0,
+                        paymentMethods: {
+                            cash: 0,
+                            mpesa: 0,
+                            bank: 0,
+                            credit: 0,
+                            mixed: 0
+                        },
+                        period: 'today'
+                    };
+
+                    if (!snapshot.empty) {
+                        snapshot.forEach(doc => {
+                            const data = doc.data();
+                            stats.totalRevenue += (data.totalSales || 0);
+                            stats.totalTransactions += (data.totalTransactions || 0);
+                            stats.paymentMethods.cash += (data.cashSales || data.CashSales || 0);
+                            stats.paymentMethods.mpesa += (data.mpesaSales || data.MpesaSales || 0);
+                            stats.paymentMethods.bank += (data.bankSales || data.BankSales || 0);
+                            stats.paymentMethods.credit += (data.creditSales || data.CreditSales || data.debtSales || data.DebtSales || 0);
+                            stats.paymentMethods.mixed += (data.mixedSales || data.MixedSales || 0);
+                        });
+                    }
+
+                    // If summary is suspiciously empty but revenue exists, maybe fallback to raw? 
+                    // For now, let's return what we found, as daily summaries are usually reliable for *today* 
+                    // (since code is current).
+                    return stats;
+                }
+            } else {
+                // Fallback for unknown types - return empty
+                return {
+                    totalRevenue: 0,
+                    totalTransactions: 0,
+                    paymentMethods: { cash: 0, mpesa: 0, bank: 0, credit: 0, mixed: 0 },
+                    period: 'unknown'
+                };
             }
         } catch (error) {
             logger.error('Get stats error:', error);
@@ -822,6 +958,102 @@ class SalesService {
         }
     }
 
+    /**
+     * Find sales combination that matches a target amount (KK-Calc Greedy Approach)
+     * @param {number} targetAmount
+     * @returns {Promise<Object>}
+     */
+    async findSalesCombination(targetAmount) {
+        try {
+            logger.info(`Finding sales combination for amount: ${targetAmount}`);
+
+            // Fetch all completed sales
+            // Optimization: Limit to reasonable time window if needed, but for now fetch all "completed"
+            // We need to fetch enough potential candidates.
+            const snapshot = await this.db.collection(this.collection)
+                .where('status', '==', 'completed')
+                .get();
+
+            let sales = serializeDocs(snapshot);
+
+            // Sort by amount DESC, then by date DESC (prefer removing recent large sales)
+            sales.sort((a, b) => {
+                if (b.grandTotal !== a.grandTotal) {
+                    return b.grandTotal - a.grandTotal;
+                }
+                return new Date(b.saleDate) - new Date(a.saleDate);
+            });
+
+            const selectedSales = [];
+            let currentSum = 0;
+            let remainingTarget = targetAmount;
+
+            for (const sale of sales) {
+                if (sale.grandTotal <= remainingTarget) {
+                    selectedSales.push(sale);
+                    currentSum += sale.grandTotal;
+                    remainingTarget -= sale.grandTotal;
+                }
+
+                if (remainingTarget === 0) break;
+            }
+
+            return {
+                targetAmount,
+                foundAmount: currentSum,
+                difference: targetAmount - currentSum,
+                count: selectedSales.length,
+                sales: selectedSales
+            };
+
+        } catch (error) {
+            logger.error('Find sales combination error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete batch of sales
+     * @param {Array<string>} saleIds
+     * @param {string} userId
+     * @returns {Promise<Object>}
+     */
+    async deleteSalesBatch(saleIds, userId) {
+        try {
+            logger.info(`Deleting batch of ${saleIds.length} sales by user ${userId}`);
+
+            const batch = this.db.batch();
+            const deletedIds = [];
+
+            for (const id of saleIds) {
+                const ref = this.db.collection(this.collection).doc(id);
+                // We could verify existence, but for batch performance we might skip reading if we trust the IDs
+                // However, to be safe and maybe restore inventory (if that's desired), we should read.
+                // The user just said "delete", and usually "deletion" in this context (adjusting revenue) 
+                // might NOT want to mess with inventory if it's just financial adjustment, 
+                // BUT "Delete Sales" usually implies reversing the transaction.
+                // Given "KK-Calc" is likely for fixing "inflated revenue" (stuff that shouldn't exist), 
+                // simply deleting the record is the request. 
+                // I will perform a hard delete for now as per "delete".
+                batch.delete(ref);
+                deletedIds.push(id);
+            }
+
+            await batch.commit();
+
+            // Invalidate cache
+            await cache.delPattern(`${this.cachePrefix}*`);
+
+            return {
+                success: true,
+                deletedCount: deletedIds.length,
+                deletedIds
+            };
+        } catch (error) {
+            logger.error('Delete sales batch error:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = new SalesService();

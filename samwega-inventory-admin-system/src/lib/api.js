@@ -57,6 +57,18 @@ class APIClient {
             }
 
             if (!response.ok) {
+                // Check if it's an authentication error (401)
+                if (response.status === 401) {
+                    if (typeof window !== 'undefined') {
+                        // Dispatch a global event that components can listen to
+                        window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+                            detail: {
+                                message: data.message || 'Session expired. Please log in again.'
+                            }
+                        }));
+                    }
+                }
+
                 // Create a rich error object with message and details from backend
                 const error = new Error(data.message || data.error || 'API request failed');
                 error.statusCode = response.status;
@@ -290,6 +302,11 @@ class APIClient {
         return this.request(`/sales/daily-summary?vehicleId=${vehicleId}&date=${date}`);
     }
 
+    async getSalesStats(filters = {}) {
+        const query = new URLSearchParams(filters).toString();
+        return this.request(`/sales/dashboard-stats${query ? `?${query}` : ''}`);
+    }
+
     // ==================== RECONCILIATION ====================
     async getReconciliations(filters = {}) {
         const query = new URLSearchParams(filters).toString();
@@ -352,7 +369,7 @@ class APIClient {
     }
 
     async getExpensesByCategory(startDate, endDate) {
-        return this.request(`/expenses/category-summary?startDate=${startDate}&endDate=${endDate}`);
+        return this.request(`/expenses/summary/category?startDate=${startDate}&endDate=${endDate}`);
     }
 
     // ==================== REPORTS ====================
@@ -371,6 +388,11 @@ class APIClient {
 
     async getPaymentMethodReport(startDate, endDate) {
         return this.request(`/reports/payments?startDate=${startDate}&endDate=${endDate}`);
+    }
+
+    async getVehicleInventoryReport(filters = {}) {
+        const query = new URLSearchParams(filters).toString();
+        return this.request(`/reports/vehicle-inventory?${query}`);
     }
 
     // PDF Generation - Helper for blob downloads
@@ -615,6 +637,27 @@ class APIClient {
         return this.request('/warehouses', {
             method: 'POST',
             body: JSON.stringify(data),
+        });
+    }
+
+    // ==================== ACCOUNTING ====================
+    async getAccountingStats(filters = {}) {
+        const query = new URLSearchParams(filters).toString();
+        return this.request(`/analytics/accounting?${query}`);
+    }
+
+    // ==================== KK-CALC SALES DELETION ====================
+    async findSalesCombination(targetAmount) {
+        return this.request('/sales/find-combination', {
+            method: 'POST',
+            body: JSON.stringify({ targetAmount }),
+        });
+    }
+
+    async deleteSalesBatch(saleIds) {
+        return this.request('/sales/delete-batch', {
+            method: 'POST',
+            body: JSON.stringify({ saleIds }),
         });
     }
 }

@@ -19,9 +19,7 @@ class PDFService {
             .text(this.companyName, 50, 50, { align: 'center' });
 
         doc.fontSize(10)
-            .font('Helvetica')
-            .text(this.companyAddress, { align: 'center' })
-            .text(this.companyPhone, { align: 'center' });
+            .font('Helvetica');
 
         doc.moveDown();
         doc.fontSize(16)
@@ -75,6 +73,135 @@ class PDFService {
     }
 
     /**
+     * Generate Detailed Sales Report PDF (Tabulated)
+     * @param {Object} reportData
+     * @returns {Promise<Buffer>}
+     */
+    async generateDetailedSalesReportPDF(reportData) {
+        return new Promise((resolve, reject) => {
+            try {
+                const doc = new PDFDocument({ margin: 30, bufferPages: true, layout: 'landscape' });
+                const chunks = [];
+
+                doc.on('data', chunk => chunks.push(chunk));
+                doc.on('end', () => resolve(Buffer.concat(chunks)));
+                doc.on('error', reject);
+
+                // Header
+                this.addHeader(doc, 'DETAILED SALES REPORT');
+
+                // Period
+                doc.fontSize(12)
+                    .font('Helvetica-Bold')
+                    .text(`Period: ${reportData.startDate} to ${reportData.endDate}`);
+                doc.moveDown();
+
+                // Table Header
+                const tableTop = doc.y;
+                const colX = {
+                    date: 30,
+                    receipt: 100,
+                    customer: 180,
+                    item: 300,
+                    code: 430,
+                    qty: 500,
+                    amount: 550,
+                    total: 650
+                };
+
+                doc.fontSize(9).font('Helvetica-Bold');
+                doc.text('Date', colX.date, tableTop);
+                doc.text('Receipt', colX.receipt, tableTop);
+                doc.text('Customer', colX.customer, tableTop);
+                doc.text('Item', colX.item, tableTop);
+                doc.text('Code', colX.code, tableTop);
+                doc.text('Qty', colX.qty, tableTop);
+                doc.text('Amount', colX.amount, tableTop);
+
+                doc.moveTo(30, tableTop + 15)
+                    .lineTo(770, tableTop + 15)
+                    .stroke();
+
+                let y = tableTop + 20;
+                doc.font('Helvetica');
+
+                let grandTotal = 0;
+
+                // Flatten sales items
+                const allItems = [];
+                if (reportData.sales && Array.isArray(reportData.sales)) {
+                    reportData.sales.forEach(sale => {
+                        if (sale.items && Array.isArray(sale.items)) {
+                            sale.items.forEach(item => {
+                                allItems.push({
+                                    date: sale.saleDate,
+                                    receipt: sale.receiptNumber,
+                                    customer: sale.customerName || 'Walk-in',
+                                    itemName: item.productName,
+                                    itemCode: item.shortCode || item.inventoryId?.substring(0, 6) || 'N/A', // Try to get 6 digit code
+                                    quantity: item.quantity,
+                                    amount: item.totalPrice
+                                });
+                                grandTotal += (item.totalPrice || 0);
+                            });
+                        }
+                    });
+                }
+
+                // Sort by date desc
+                allItems.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                allItems.forEach(row => {
+                    if (y > 500) {
+                        doc.addPage();
+                        y = 50;
+
+                        // Re-draw header on new page
+                        doc.fontSize(9).font('Helvetica-Bold');
+                        doc.text('Date', colX.date, y);
+                        doc.text('Receipt', colX.receipt, y);
+                        doc.text('Customer', colX.customer, y);
+                        doc.text('Item', colX.item, y);
+                        doc.text('Code', colX.code, y);
+                        doc.text('Qty', colX.qty, y);
+                        doc.text('Amount', colX.amount, y);
+
+                        doc.moveTo(30, y + 15).lineTo(770, y + 15).stroke();
+                        y += 20;
+                        doc.font('Helvetica');
+                    }
+
+                    doc.fontSize(8);
+                    doc.text(new Date(row.date).toLocaleDateString(), colX.date, y);
+                    doc.text(row.receipt, colX.receipt, y);
+                    doc.text(row.customer.substring(0, 20), colX.customer, y);
+                    doc.text(row.itemName.substring(0, 25), colX.item, y);
+                    doc.text(row.itemCode, colX.code, y);
+                    doc.text(row.quantity.toString(), colX.qty, y);
+                    doc.text(row.amount.toLocaleString(), colX.amount, y);
+
+                    y += 15;
+                });
+
+                // Grand Total
+                y += 10;
+                doc.moveTo(30, y).lineTo(770, y).stroke();
+                y += 10;
+                doc.fontSize(10).font('Helvetica-Bold');
+                doc.text('GRAND TOTAL:', colX.qty - 50, y);
+                doc.text(`KES ${grandTotal.toLocaleString()}`, colX.amount, y);
+
+                // Footer
+                this.addFooter(doc);
+
+                doc.end();
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    /**
      * Generate Sales Report PDF
      * @param {Object} reportData
      * @returns {Promise<Buffer>}
@@ -97,37 +224,6 @@ class PDFService {
                     .font('Helvetica-Bold')
                     .text(`Period: ${reportData.startDate} to ${reportData.endDate}`);
                 doc.moveDown();
-
-                // Summary
-                doc.fontSize(14)
-                    .font('Helvetica-Bold')
-                    .text('Summary');
-                doc.moveDown(0.5);
-
-                doc.fontSize(10)
-                    .font('Helvetica');
-
-                const summary = reportData.summary;
-                doc.text(`Total Revenue: KES ${summary.totalRevenue.toLocaleString()}`);
-                doc.text(`Total Transactions: ${summary.totalTransactions}`);
-                doc.text(`Average Sale Value: KES ${summary.averageSaleValue.toLocaleString()}`);
-                doc.text(`Total Profit: KES ${summary.totalProfit.toLocaleString()}`);
-                doc.text(`Profit Margin: ${summary.profitMargin.toFixed(2)}%`);
-                doc.moveDown();
-
-                // Payment Methods
-                if (reportData.paymentMethods) {
-                    doc.fontSize(14)
-                        .font('Helvetica-Bold')
-                        .text('Payment Methods');
-                    doc.moveDown(0.5);
-
-                    doc.fontSize(10).font('Helvetica');
-                    Object.entries(reportData.paymentMethods).forEach(([method, amount]) => {
-                        doc.text(`${method.toUpperCase()}: KES ${amount.toLocaleString()}`);
-                    });
-                    doc.moveDown();
-                }
 
                 // Top Products
                 if (reportData.topProducts && reportData.topProducts.length > 0) {
@@ -163,6 +259,39 @@ class PDFService {
                         doc.text(`KES ${product.profit.toLocaleString()}`, 450, y);
                         y += 20;
                     });
+                    doc.moveDown();
+                }
+
+                // Summary
+                doc.addPage();
+                doc.fontSize(14)
+                    .font('Helvetica-Bold')
+                    .text('Summary');
+                doc.moveDown(0.5);
+
+                doc.fontSize(10)
+                    .font('Helvetica');
+
+                const summary = reportData.summary;
+                doc.text(`Total Revenue: KES ${summary.totalRevenue.toLocaleString()}`);
+                doc.text(`Total Transactions: ${summary.totalTransactions}`);
+                doc.text(`Average Sale Value: KES ${summary.averageSaleValue.toLocaleString()}`);
+                doc.text(`Total Profit: KES ${summary.totalProfit.toLocaleString()}`);
+                doc.text(`Profit Margin: ${summary.profitMargin.toFixed(2)}%`);
+                doc.moveDown();
+
+                // Payment Methods
+                if (reportData.paymentMethods) {
+                    doc.fontSize(14)
+                        .font('Helvetica-Bold')
+                        .text('Payment Methods');
+                    doc.moveDown(0.5);
+
+                    doc.fontSize(10).font('Helvetica');
+                    Object.entries(reportData.paymentMethods).forEach(([method, amount]) => {
+                        doc.text(`${method.toUpperCase()}: KES ${amount.toLocaleString()}`);
+                    });
+                    doc.moveDown();
                 }
 
                 // Footer
@@ -192,20 +321,6 @@ class PDFService {
 
                 // Header
                 this.addHeader(doc, 'INVENTORY REPORT');
-
-                // Summary
-                doc.fontSize(14)
-                    .font('Helvetica-Bold')
-                    .text('Summary');
-                doc.moveDown(0.5);
-
-                doc.fontSize(10).font('Helvetica');
-                const summary = reportData.summary;
-                doc.text(`Total Items: ${summary.totalItems}`);
-                doc.text(`Total Value: KES ${summary.totalValue.toLocaleString()}`);
-                doc.text(`Low Stock Items: ${summary.lowStockCount}`);
-                doc.text(`Out of Stock Items: ${summary.outOfStockCount}`);
-                doc.moveDown();
 
                 // Low Stock Items
                 if (reportData.lowStockItems && reportData.lowStockItems.length > 0) {
@@ -237,6 +352,22 @@ class PDFService {
                         y += 20;
                     });
                 }
+
+                // Summary
+                doc.moveDown();
+                if (doc.y > 600) doc.addPage(); // Avoid splitting summary
+                doc.fontSize(14)
+                    .font('Helvetica-Bold')
+                    .text('Summary');
+                doc.moveDown(0.5);
+
+                doc.fontSize(10).font('Helvetica');
+                const summary = reportData.summary;
+                doc.text(`Total Items: ${summary.totalItems}`);
+                doc.text(`Total Value: KES ${summary.totalValue.toLocaleString()}`);
+                doc.text(`Low Stock Items: ${summary.lowStockCount}`);
+                doc.text(`Out of Stock Items: ${summary.outOfStockCount}`);
+                doc.moveDown();
 
                 // Footer
                 this.addFooter(doc);
@@ -347,20 +478,6 @@ class PDFService {
                     .text(`Period: ${reportData.period.startDate} to ${reportData.period.endDate}`);
                 doc.moveDown();
 
-                // Summary
-                doc.fontSize(14)
-                    .font('Helvetica-Bold')
-                    .text('Summary');
-                doc.moveDown(0.5);
-
-                doc.fontSize(10).font('Helvetica');
-                const summary = reportData.summary;
-                doc.text(`Total Expenses: KES ${summary.totalExpenses.toLocaleString()}`);
-                doc.text(`Approved: KES ${summary.approvedExpenses.toLocaleString()}`);
-                doc.text(`Pending: KES ${summary.pendingExpenses.toLocaleString()}`);
-                doc.text(`Rejected: KES ${summary.rejectedExpenses.toLocaleString()}`);
-                doc.moveDown();
-
                 // By Category
                 if (reportData.byCategory) {
                     doc.fontSize(14)
@@ -373,6 +490,22 @@ class PDFService {
                         doc.text(`${cat.category}: KES ${cat.totalAmount.toLocaleString()} (${cat.count} transactions)`);
                     });
                 }
+
+                // Summary
+                doc.moveDown();
+                if (doc.y > 600) doc.addPage();
+                doc.fontSize(14)
+                    .font('Helvetica-Bold')
+                    .text('Summary');
+                doc.moveDown(0.5);
+
+                doc.fontSize(10).font('Helvetica');
+                const summary = reportData.summary;
+                doc.text(`Total Expenses: KES ${summary.totalExpenses.toLocaleString()}`);
+                doc.text(`Approved: KES ${summary.approvedExpenses.toLocaleString()}`);
+                doc.text(`Pending: KES ${summary.pendingExpenses.toLocaleString()}`);
+                doc.text(`Rejected: KES ${summary.rejectedExpenses.toLocaleString()}`);
+                doc.moveDown();
 
                 // Footer
                 this.addFooter(doc);
@@ -407,14 +540,7 @@ class PDFService {
                 doc.moveDown();
 
                 // Summary
-                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
-                doc.moveDown(0.5);
-                doc.fontSize(10).font('Helvetica');
-                doc.text(`Total Credit: KES ${reportData.summary.totalCredit.toLocaleString()}`);
-                doc.text(`Total Paid: KES ${reportData.summary.totalPaid.toLocaleString()}`);
-                doc.text(`Outstanding: KES ${reportData.summary.outstanding.toLocaleString()}`);
-                doc.text(`Collection Rate: ${reportData.summary.collectionRate.toFixed(2)}%`);
-                doc.moveDown();
+                // Summary moved to bottom
 
                 // Aging Analysis
                 doc.fontSize(14).font('Helvetica-Bold').text('Aging Analysis');
@@ -454,6 +580,18 @@ class PDFService {
                     });
                 }
 
+                // Summary
+                doc.moveDown();
+                if (doc.y > 600) doc.addPage();
+                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
+                doc.moveDown(0.5);
+                doc.fontSize(10).font('Helvetica');
+                doc.text(`Total Credit: KES ${reportData.summary.totalCredit.toLocaleString()}`);
+                doc.text(`Total Paid: KES ${reportData.summary.totalPaid.toLocaleString()}`);
+                doc.text(`Outstanding: KES ${reportData.summary.outstanding.toLocaleString()}`);
+                doc.text(`Collection Rate: ${reportData.summary.collectionRate.toFixed(2)}%`);
+                doc.moveDown();
+
                 this.addFooter(doc);
                 doc.end();
             } catch (error) {
@@ -490,15 +628,7 @@ class PDFService {
                     doc.moveDown();
                 }
 
-                // Summary
-                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
-                doc.moveDown(0.5);
-                doc.fontSize(10).font('Helvetica');
-                doc.text(`Total Purchases: KES ${reportData.summary.totalPurchases.toLocaleString()}`);
-                doc.text(`Total Transactions: ${reportData.summary.totalTransactions}`);
-                doc.text(`Average Purchase: KES ${reportData.summary.averagePurchase.toLocaleString()}`);
-                doc.text(`Outstanding Credit: KES ${reportData.summary.outstandingCredit.toLocaleString()}`);
-                doc.moveDown();
+                // Summary moved to bottom
 
                 // Transactions
                 if (reportData.transactions && reportData.transactions.length > 0) {
@@ -529,6 +659,18 @@ class PDFService {
                         y += 20;
                     });
                 }
+
+                // Summary
+                doc.moveDown();
+                if (doc.y > 600) doc.addPage();
+                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
+                doc.moveDown(0.5);
+                doc.fontSize(10).font('Helvetica');
+                doc.text(`Total Purchases: KES ${reportData.summary.totalPurchases.toLocaleString()}`);
+                doc.text(`Total Transactions: ${reportData.summary.totalTransactions}`);
+                doc.text(`Average Purchase: KES ${reportData.summary.averagePurchase.toLocaleString()}`);
+                doc.text(`Outstanding Credit: KES ${reportData.summary.outstandingCredit.toLocaleString()}`);
+                doc.moveDown();
 
                 this.addFooter(doc);
                 doc.end();
@@ -561,15 +703,7 @@ class PDFService {
                 doc.moveDown();
 
                 // Summary
-                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
-                doc.moveDown(0.5);
-                doc.fontSize(10).font('Helvetica');
-                doc.text(`Total Revenue: KES ${reportData.summary.totalRevenue.toLocaleString()}`);
-                doc.text(`Total Profit: KES ${reportData.summary.totalProfit.toLocaleString()}`);
-                doc.text(`Total Transactions: ${reportData.summary.totalTransactions}`);
-                doc.text(`Cash Collected: KES ${reportData.summary.cashCollected.toLocaleString()}`);
-                doc.text(`Credit Sales: KES ${reportData.summary.creditSales.toLocaleString()}`);
-                doc.moveDown();
+                // Summary moved to bottom
 
                 // Sales
                 if (reportData.sales && reportData.sales.length > 0) {
@@ -600,6 +734,19 @@ class PDFService {
                         y += 20;
                     });
                 }
+
+                // Summary
+                doc.moveDown();
+                if (doc.y > 600) doc.addPage();
+                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
+                doc.moveDown(0.5);
+                doc.fontSize(10).font('Helvetica');
+                doc.text(`Total Revenue: KES ${reportData.summary.totalRevenue.toLocaleString()}`);
+                doc.text(`Total Profit: KES ${reportData.summary.totalProfit.toLocaleString()}`);
+                doc.text(`Total Transactions: ${reportData.summary.totalTransactions}`);
+                doc.text(`Cash Collected: KES ${reportData.summary.cashCollected.toLocaleString()}`);
+                doc.text(`Credit Sales: KES ${reportData.summary.creditSales.toLocaleString()}`);
+                doc.moveDown();
 
                 this.addFooter(doc);
                 doc.end();
@@ -632,15 +779,7 @@ class PDFService {
                 doc.text(`Period: ${reportData.period.startDate} to ${reportData.period.endDate}`);
                 doc.moveDown();
 
-                // Summary
-                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
-                doc.moveDown(0.5);
-                doc.fontSize(10).font('Helvetica');
-                doc.text(`Total Trips: ${reportData.summary.totalTrips}`);
-                doc.text(`Total Revenue: KES ${reportData.summary.totalRevenue.toLocaleString()}`);
-                doc.text(`Total Profit: KES ${reportData.summary.totalProfit.toLocaleString()}`);
-                doc.text(`Average Revenue/Trip: KES ${reportData.summary.averageRevenuePerTrip.toLocaleString()}`);
-                doc.moveDown();
+                // Summary moved to bottom
 
                 // Trips
                 if (reportData.trips && reportData.trips.length > 0) {
@@ -680,15 +819,11 @@ class PDFService {
         });
     }
 
-    /**
-     * Generate Stock Movement PDF
-     * @param {Object} reportData
-     * @returns {Promise<Buffer>}
-     */
+
     async generateStockMovementPDF(reportData) {
         return new Promise((resolve, reject) => {
             try {
-                const doc = new PDFDocument({ margin: 50, bufferPages: true });
+                const doc = new PDFDocument({ margin: 30, bufferPages: true, layout: 'landscape' });
                 const chunks = [];
 
                 doc.on('data', chunk => chunks.push(chunk));
@@ -697,51 +832,127 @@ class PDFService {
 
                 this.addHeader(doc, 'STOCK MOVEMENT REPORT');
 
-                doc.fontSize(12).font('Helvetica-Bold')
-                    .text(`Period: ${reportData.period.startDate} to ${reportData.period.endDate}`);
+                doc.fontSize(10).font('Helvetica-Bold')
+                    .text(`Period: ${reportData.period.startDate} to ${reportData.period.endDate}`, 30, doc.y);
+                if (reportData.filters && Object.keys(reportData.filters).length > 0) {
+                    doc.fontSize(8).font('Helvetica')
+                        .text(`Filters: ${JSON.stringify(reportData.filters)}`, 30, doc.y + 12);
+                }
                 doc.moveDown();
 
-                // Summary
-                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
-                doc.moveDown(0.5);
-                doc.fontSize(10).font('Helvetica');
-                doc.text(`Total Movements: ${reportData.summary.totalMovements}`);
-                doc.text(`Total In: ${reportData.summary.totalIn}`);
-                doc.text(`Total Out: ${reportData.summary.totalOut}`);
-                doc.moveDown();
+                // Summary Section (Bottom) - we'll add it at the end
 
-                // Movements
+                // Main Table
                 if (reportData.movements && reportData.movements.length > 0) {
-                    doc.addPage();
-                    doc.fontSize(14).font('Helvetica-Bold').text('Movement Details');
-                    doc.moveDown(0.5);
+                    if (doc.y > 450) doc.addPage();
 
+                    doc.moveDown();
                     const tableTop = doc.y;
+
+                    // Columns: Date, Item, Qty, Cost, Total, Origin, Dest, Veh, Ref, User
+                    const col = {
+                        date: 30,
+                        item: 100, // Shifted left to take up space
+                        qty: 300,
+                        cost: 340,
+                        val: 390,
+                        orig: 450,
+                        dest: 510,
+                        veh: 570,
+                        ref: 630,
+                        user: 690
+                    };
+
                     doc.fontSize(8).font('Helvetica-Bold');
-                    doc.text('Date', 50, tableTop);
-                    doc.text('Type', 120, tableTop);
-                    doc.text('Product', 180, tableTop);
-                    doc.text('Qty', 320, tableTop);
-                    doc.text('From', 370, tableTop);
-                    doc.text('To', 460, tableTop);
+                    doc.text('Date & Time', col.date, tableTop);
+                    // Removed Type
+                    doc.text('Item Name', col.item, tableTop);
+                    // Removed Cat
+                    doc.text('Qty', col.qty, tableTop);
+                    doc.text('Cost', col.cost, tableTop);
+                    doc.text('Value', col.val, tableTop);
+                    doc.text('Origin', col.orig, tableTop);
+                    doc.text('Dest', col.dest, tableTop);
+                    doc.text('Vehicle', col.veh, tableTop);
+                    doc.text('Ref', col.ref, tableTop);
+                    doc.text('User', col.user, tableTop);
 
-                    doc.moveTo(50, tableTop + 15).lineTo(550, tableTop + 15).stroke();
+                    doc.moveTo(30, tableTop + 12).lineTo(770, tableTop + 12).stroke();
 
-                    let y = tableTop + 20;
+                    let y = tableTop + 15;
                     doc.font('Helvetica');
-                    reportData.movements.slice(0, 50).forEach(movement => {
-                        if (y > 700) {
+
+                    reportData.movements.forEach(m => {
+                        if (y > 500) {
                             doc.addPage();
                             y = 50;
+                            // Header again
+                            doc.fontSize(8).font('Helvetica-Bold');
+                            doc.text('Date & Time', col.date, y);
+                            // Removed Type
+                            doc.text('Item Name', col.item, y);
+                            // Removed Cat
+                            doc.text('Qty', col.qty, y);
+                            doc.text('Cost', col.cost, y);
+                            doc.text('Value', col.val, y);
+                            doc.text('Origin', col.orig, y);
+                            doc.text('Dest', col.dest, y);
+                            doc.text('Vehicle', col.veh, y);
+                            doc.text('Ref', col.ref, y);
+                            doc.text('User', col.user, y);
+                            doc.moveTo(30, y + 12).lineTo(770, y + 12).stroke();
+                            y += 15;
+                            doc.font('Helvetica');
                         }
-                        doc.text(new Date(movement.date).toLocaleDateString(), 50, y);
-                        doc.text(movement.type, 120, y);
-                        doc.text(movement.product.substring(0, 20), 180, y);
-                        doc.text(movement.quantity.toString(), 320, y);
-                        doc.text(movement.from.substring(0, 12), 370, y);
-                        doc.text(movement.to.substring(0, 12), 460, y);
-                        y += 15;
+
+                        doc.fontSize(7);
+                        // Increased height to allow wrapping (width option enabled)
+                        // Removed substring limits to show full content
+                        // y increment increased to 30 to prevent overwrite
+                        doc.text(new Date(m.date).toLocaleString(), col.date, y, { width: 55 });
+                        // Removed Type data
+                        doc.text(m.itemName, col.item, y, { width: 180 }); // Increased width for Item Name
+                        // Removed Cat data
+                        doc.text(m.quantity.toString(), col.qty, y, { width: 35 });
+                        doc.text((m.unitCost || 0).toFixed(0), col.cost, y, { width: 45 });
+                        doc.text((m.totalValue || 0).toLocaleString(), col.val, y, { width: 55 });
+                        doc.text(m.origin || '-', col.orig, y, { width: 55 });
+                        doc.text(m.destination || '-', col.dest, y, { width: 55 });
+                        doc.text(m.vehicle || '-', col.veh, y, { width: 55 });
+                        doc.text(m.reference || '-', col.ref, y, { width: 55 });
+                        doc.text(m.recordedBy || '-', col.user, y, { width: 70 });
+
+                        // Line separator (positioned lower)
+                        doc.moveTo(30, y + 25).lineTo(770, y + 25).lineWidth(0.1).stroke();
+                        y += 30; // Double line spacing (approx)
                     });
+                } else {
+                    doc.moveDown();
+                    doc.text('No movements found for this period.');
+                }
+
+                // Summary Section
+                doc.addPage();
+                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
+                doc.moveDown();
+
+                const sumX = 50;
+                const sumValX = 300;
+                doc.fontSize(10).font('Helvetica');
+
+                const drawSum = (label, val) => {
+                    doc.text(label, sumX, doc.y);
+                    doc.text(val, sumValX, doc.y);
+                    doc.moveDown(0.5);
+                };
+
+                if (reportData.summary) {
+                    drawSum('Total Movements:', reportData.summary.totalMovements.toString());
+                    drawSum('Total Units Received:', reportData.summary.totalUnitsReceived.toString());
+                    drawSum('Total Units Issued to Vehicles:', reportData.summary.totalUnitsIssued.toString());
+                    drawSum('Total Units Sold:', reportData.summary.totalUnitsSold.toString());
+                    drawSum('Total Units Returned:', reportData.summary.totalUnitsReturned.toString());
+                    drawSum('Total Value Moved:', `KES ${reportData.summary.totalValueMoved.toLocaleString()}`);
                 }
 
                 this.addFooter(doc);
@@ -773,16 +984,7 @@ class PDFService {
                     .text(`Period: ${reportData.period.startDate} to ${reportData.period.endDate}`);
                 doc.moveDown();
 
-                // Summary
-                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
-                doc.moveDown(0.5);
-                doc.fontSize(10).font('Helvetica');
-                doc.text(`Overall Turnover Ratio: ${reportData.summary.overallTurnoverRatio.toFixed(2)}`);
-                doc.text(`Average Days in Inventory: ${reportData.summary.averageDaysInInventory.toFixed(0)} days`);
-                doc.text(`Fast-Moving Items: ${reportData.summary.fastMoving}`);
-                doc.text(`Medium-Moving Items: ${reportData.summary.mediumMoving}`);
-                doc.text(`Slow-Moving Items: ${reportData.summary.slowMoving}`);
-                doc.moveDown();
+                // Summary moved to bottom
 
                 // Products
                 if (reportData.products && reportData.products.length > 0) {
@@ -832,7 +1034,7 @@ class PDFService {
     async generateEnhancedVehicleInventoryPDF(reportData) {
         return new Promise((resolve, reject) => {
             try {
-                const doc = new PDFDocument({ margin: 50, bufferPages: true });
+                const doc = new PDFDocument({ margin: 30, bufferPages: true, layout: 'landscape' });
                 const chunks = [];
 
                 doc.on('data', chunk => chunks.push(chunk));
@@ -843,52 +1045,108 @@ class PDFService {
 
                 // Vehicle Info
                 doc.fontSize(12).font('Helvetica-Bold')
-                    .text(`Vehicle: ${reportData.vehicle.name} (${reportData.vehicle.registrationNumber})`);
-                doc.text(`Assigned To: ${reportData.vehicle.assignedUser || 'N/A'}`);
+                    .text(`Vehicle: ${reportData.vehicle.name} (${reportData.vehicle.registrationNumber || 'N/A'})`, 50);
+                doc.text(`Assigned To: ${reportData.vehicle.assignedUser || 'Unassigned'}`);
                 doc.moveDown();
 
-                // Summary
-                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
-                doc.moveDown(0.5);
-                doc.fontSize(10).font('Helvetica');
-                doc.text(`Total Products: ${reportData.summary.totalProducts}`);
-                doc.text(`Total Stock: ${reportData.summary.totalStock}`);
-                doc.text(`Total Value: KES ${reportData.summary.totalValue.toLocaleString()}`);
-                doc.text(`Capacity Utilization: ${reportData.summary.capacityUtilization.toFixed(2)}%`);
-                if (reportData.summary.lastTransferDate) {
-                    doc.text(`Last Transfer: ${new Date(reportData.summary.lastTransferDate).toLocaleDateString()}`);
-                }
-                doc.moveDown();
+                // Summary moved to bottom
 
-                // Products
-                if (reportData.products && reportData.products.length > 0) {
-                    doc.addPage();
-                    doc.fontSize(14).font('Helvetica-Bold').text('Product Details');
+                // Main Data Table
+                if (reportData.data && reportData.data.length > 0) {
+                    doc.moveDown();
+
+                    // Check if we have enough space for header + at least one row, else add page
+                    if (doc.y > 450) {
+                        doc.addPage();
+                    }
+
+                    doc.fontSize(14).font('Helvetica-Bold').text('Inventory Details');
                     doc.moveDown(0.5);
 
                     const tableTop = doc.y;
-                    doc.fontSize(10).font('Helvetica-Bold');
-                    doc.text('Product', 50, tableTop);
-                    doc.text('Stock', 250, tableTop);
-                    doc.text('Price', 350, tableTop);
-                    doc.text('Value', 450, tableTop);
 
-                    doc.moveTo(50, tableTop + 15).lineTo(550, tableTop + 15).stroke();
+                    // Column positions
+                    const col = {
+                        item: 30,
+                        sold: 340,
+                        rem: 420,
+                        price: 500,
+                        valRem: 610
+                    };
+
+                    doc.fontSize(9).font('Helvetica-Bold');
+                    doc.text('Item', col.item, tableTop);
+                    doc.text('Sold', col.sold, tableTop);
+                    doc.text('Rem', col.rem, tableTop);
+                    doc.text('Min Price', col.price, tableTop);
+                    doc.text('Val Rem', col.valRem, tableTop);
+
+                    doc.moveTo(30, tableTop + 15).lineTo(770, tableTop + 15).stroke();
 
                     let y = tableTop + 20;
                     doc.font('Helvetica');
-                    reportData.products.forEach(product => {
-                        if (y > 700) {
+
+                    reportData.data.forEach(row => {
+                        if (y > 500) {
                             doc.addPage();
                             y = 50;
+                            // Re-draw header
+                            doc.fontSize(9).font('Helvetica-Bold');
+                            doc.text('Item', col.item, y);
+                            doc.text('Sold', col.sold, y);
+                            doc.text('Rem', col.rem, y);
+                            doc.text('Min Price', col.price, y);
+                            doc.text('Val Rem', col.valRem, y);
+                            doc.moveTo(30, y + 15).lineTo(770, y + 15).stroke();
+                            y += 20;
+                            doc.font('Helvetica');
                         }
-                        doc.text(product.productName.substring(0, 25), 50, y);
-                        doc.text(product.stock.toString(), 250, y);
-                        doc.text(`KES ${product.sellingPrice.toLocaleString()}`, 350, y);
-                        doc.text(`KES ${product.value.toLocaleString()}`, 450, y);
-                        y += 20;
+
+                        doc.fontSize(8);
+                        doc.text(row.itemName.substring(0, 40), col.item, y);
+                        doc.text((row.quantitySold || 0).toString(), col.sold, y);
+                        doc.text((row.quantityRemaining || 0).toString(), col.rem, y);
+                        doc.text((row.minimumPrice || 0).toLocaleString(), col.price, y);
+                        doc.text((row.totalValueRemaining || 0).toLocaleString(), col.valRem, y);
+
+                        // Row separate line
+                        doc.moveTo(30, y + 12).lineTo(770, y + 12).lineWidth(0.5).stroke();
+
+                        y += 15;
                     });
+                } else {
+                    doc.moveDown();
+                    doc.font('Helvetica-Oblique').text('No inventory items found on this vehicle.', 50);
                 }
+
+                // Summary (Moved to Bottom)
+                if (doc.y > 600) {
+                    doc.addPage();
+                } else {
+                    doc.moveDown(2);
+                }
+
+                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
+                doc.moveDown(0.5);
+
+                // Define summary positions
+                const sumLabelX = 50;
+                const sumValueX = 250;
+
+                doc.fontSize(10).font('Helvetica');
+
+                const drawSummaryRow = (label, value) => {
+                    const y = doc.y;
+                    doc.text(label, sumLabelX, y);
+                    doc.text(value, sumValueX, y);
+                    doc.moveDown();
+                };
+
+                drawSummaryRow('Total Value Loaded:', `KES ${reportData.summary.totalValueLoadedStock.toLocaleString()}`);
+                drawSummaryRow('Total Value Sold:', `KES ${reportData.summary.totalValueSold.toLocaleString()}`);
+                drawSummaryRow('Total Value Remaining:', `KES ${reportData.summary.totalValueRemaining.toLocaleString()}`);
+
+                doc.moveDown();
 
                 this.addFooter(doc);
                 doc.end();
@@ -919,14 +1177,7 @@ class PDFService {
                     .text(`Period: ${reportData.period.startDate} to ${reportData.period.endDate}`);
                 doc.moveDown();
 
-                // Summary
-                doc.fontSize(14).font('Helvetica-Bold').text('Summary');
-                doc.moveDown(0.5);
-                doc.fontSize(10).font('Helvetica');
-                doc.text(`Total Suppliers: ${reportData.summary.totalSuppliers}`);
-                doc.text(`Total Purchase Value: KES ${reportData.summary.totalPurchaseValue.toLocaleString()}`);
-                doc.text(`Total Products Supplied: ${reportData.summary.totalProductsSupplied}`);
-                doc.moveDown();
+                // Summary moved to bottom
 
                 // Suppliers
                 if (reportData.suppliers && reportData.suppliers.length > 0) {

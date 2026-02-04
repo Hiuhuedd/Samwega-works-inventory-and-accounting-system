@@ -335,6 +335,33 @@ const dailySummarySchema = Joi.object({
     date: Joi.date().iso().required()
 });
 
+/**
+ * Find sales combination schema
+ */
+const findCombinationSchema = Joi.object({
+    targetAmount: Joi.number()
+        .positive()
+        .required()
+        .messages({
+            'number.positive': 'Target amount must be positive',
+            'any.required': 'Target amount is required'
+        })
+});
+
+/**
+ * Delete batch sales schema
+ */
+const deleteBatchSchema = Joi.object({
+    saleIds: Joi.array()
+        .items(Joi.string().required())
+        .min(1)
+        .required()
+        .messages({
+            'array.min': 'At least one sale ID is required',
+            'any.required': 'Sale IDs array is required'
+        })
+});
+
 module.exports = {
     createSaleSchema,
     updateSaleSchema,
@@ -343,5 +370,7 @@ module.exports = {
     searchSalesSchema,
     dailySummarySchema,
     saleItemSchema,
-    paymentSchema
+    paymentSchema,
+    findCombinationSchema,
+    deleteBatchSchema
 };

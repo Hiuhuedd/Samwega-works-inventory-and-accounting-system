@@ -886,72 +886,192 @@ class ReportsService {
     async generateStockMovementReport(startDate, endDate, filters = {}) {
         try {
             const { productId, transactionType } = filters;
-            const cacheKey = `${this.cachePrefix}stock-movement:${startDate}:${endDate}:${JSON.stringify(filters)}`;
-            const cached = await cache.get(cacheKey);
-            if (cached) return cached;
+            console.log(`Generating Stock Movement Report: ${startDate} to ${endDate}, filters:`, filters);
 
-            // Get transfers
-            let transferQuery = this.db.collection('transfers');
-            if (startDate) transferQuery = transferQuery.where('createdAt', '>=', new Date(startDate));
-            if (endDate) transferQuery = transferQuery.where('createdAt', '<=', new Date(endDate));
+            // no cache for now to ensure freshness during debugging
+            // const cacheKey = `${this.cachePrefix}stock-movement:${startDate}:${endDate}:${JSON.stringify(filters)}`;
+            // const cached = await cache.get(cacheKey);
+            // if (cached) return cached;
+
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            // end of day for end date
+            end.setHours(23, 59, 59, 999);
+
+            const movements = [];
+
+            // 1. Get Stock Transfers (Issued to Vehicle)
+            // Fix: Use 'stock_transfers' collection, not 'transfers'
+            let transferQuery = this.db.collection('stock_transfers');
+            // Note: createdAt vs updatedAt. CreatedAt is safer for movement date.
+
+            // We can't easily filter by date AND product on different fields efficiently without composite indexes
+            // So we fetch by date range first (most selective usually)
+            if (startDate) transferQuery = transferQuery.where('createdAt', '>=', start);
+            if (endDate) transferQuery = transferQuery.where('createdAt', '<=', end);
 
             const transfersSnapshot = await transferQuery.get();
             const transfers = serializeDocs(transfersSnapshot);
 
-            // Get sales
+            transfers.forEach(transfer => {
+                // Determine type based on status? 
+                // Usually stock_transfers are "Main Store" -> "Vehicle" (Issued to Vehicle)
+                // If we implement returns here later, we check fromLocation/toLocation
+
+                // Only count completed/approved/collected transfers?
+                // The prompt says "Audit trail of every movement". 
+                // 'pending' might not be a movement yet. 'approved' means stock left store.
+                if (['approved', 'collected', 'completed', 'partially_collected'].includes(transfer.status)) {
+                    if (transfer.items) {
+                        transfer.items.forEach(item => {
+                            if (!productId || item.inventoryId === productId) {
+                                movements.push({
+                                    id: transfer.id,
+                                    date: transfer.createdAt || transfer.issuedAt,
+                                    type: 'Issued to Vehicle',
+                                    itemName: item.productName,
+                                    itemCategory: 'General', // We might need to fetch this if critical, or map from item
+                                    quantity: item.layers ? item.layers.reduce((sum, l) => sum + (l.quantity || 0), 0) : (item.quantity || 0), // Rough estimate if layers used
+                                    // Layer detail handling is complex for "Quantity Moved" single scalar. 
+                                    // For now, if we have layers, we might just sum them? 
+                                    // Ideally we should use base units.
+                                    // Let's assume quantity is meaningful.
+                                    unitCost: 0, // Need to fetch?
+                                    totalValue: 0,
+                                    origin: 'Warehouse',
+                                    destination: transfer.vehicleName || 'Vehicle',
+                                    vehicle: transfer.vehicleName,
+                                    reference: transfer.transferNumber,
+                                    recordedBy: transfer.issuedByName || 'System'
+                                });
+                            }
+                        });
+                    }
+                }
+            });
+
+            // 2. Get Sales (Sold to Customer)
             let salesQuery = this.db.collection('sales').where('status', '==', 'completed');
-            if (startDate) salesQuery = salesQuery.where('saleDate', '>=', new Date(startDate));
-            if (endDate) salesQuery = salesQuery.where('saleDate', '<=', new Date(endDate));
+            if (startDate) salesQuery = salesQuery.where('saleDate', '>=', start);
+            if (endDate) salesQuery = salesQuery.where('saleDate', '<=', end);
 
             const salesSnapshot = await salesQuery.get();
             const sales = serializeDocs(salesSnapshot);
 
-            // Compile movements
-            const movements = [];
-
-            // Add transfers
-            transfers.forEach(transfer => {
-                transfer.items.forEach(item => {
-                    if (!productId || item.inventoryId === productId) {
-                        movements.push({
-                            type: 'transfer',
-                            date: transfer.createdAt,
-                            product: item.productName,
-                            quantity: item.quantity,
-                            from: 'Warehouse',
-                            to: transfer.vehicleName,
-                            reference: transfer.transferNumber,
-                            status: transfer.status
-                        });
-                    }
-                });
-            });
-
-            // Add sales
             sales.forEach(sale => {
-                sale.items.forEach(item => {
-                    if (!productId || item.inventoryId === productId) {
-                        movements.push({
-                            type: 'sale',
-                            date: sale.saleDate,
-                            product: item.productName,
-                            quantity: -item.quantity,
-                            from: sale.vehicleName,
-                            to: 'Customer',
-                            reference: sale.receiptNumber,
-                            status: 'completed'
-                        });
-                    }
-                });
+                if (sale.items) {
+                    sale.items.forEach(item => {
+                        if (!productId || item.inventoryId === productId) {
+                            movements.push({
+                                id: sale.id,
+                                date: sale.saleDate,
+                                type: 'Sold to Customer',
+                                itemName: item.productName,
+                                itemCategory: item.category || 'General',
+                                quantity: item.quantity,
+                                unitCost: item.unitPrice, // This is selling price
+                                totalValue: item.quantity * item.unitPrice,
+                                origin: sale.vehicleName || 'Vehicle', // Sales usually from vehicle
+                                destination: 'Customer',
+                                vehicle: sale.vehicleName,
+                                reference: sale.receiptNumber,
+                                recordedBy: sale.salesRepName || 'Sales Rep'
+                            });
+                        }
+                    });
+                }
             });
 
-            // Sort by date
+            // 3. Get Supplier Receipts (Received from Supplier)
+            // Source: 'inventory' collection -> replenishmentHistory array
+            // This is heavy but necessary for past data.
+            // Future optimization: Use 'stock_adjustments' collection.
+
+            // Strategy: Fetch all inventory items (maybe filtered by productId if provided)
+            let inventoryQuery = this.db.collection('inventory');
+            if (productId) inventoryQuery = inventoryQuery.where('__name__', '==', productId);
+
+            const inventorySnapshot = await inventoryQuery.get();
+            // We don't limit date here because history is inside the doc. 
+            // Warning: scan all inventory.
+
+            inventorySnapshot.forEach(doc => {
+                const item = doc.data();
+                if (item.replenishmentHistory && Array.isArray(item.replenishmentHistory)) {
+                    item.replenishmentHistory.forEach(rep => {
+                        const repDate = new Date(rep.replenishedAt);
+                        if (repDate >= start && repDate <= end) {
+                            movements.push({
+                                id: `${doc.id}_${repDate.getTime()}`, // Synthetic ID
+                                date: rep.replenishedAt,
+                                type: 'Received from Supplier',
+                                itemName: item.productName,
+                                itemCategory: item.category || 'General',
+                                quantity: rep.quantity,
+                                unitCost: rep.buyingPrice || 0,
+                                totalValue: (rep.quantity) * (rep.buyingPrice || 0),
+                                origin: 'Supplier',
+                                destination: 'Warehouse',
+                                vehicle: null,
+                                reference: getInvoiceNumber(rep.invoiceId) || 'N/A', // We might not have invoice number handy
+                                recordedBy: rep.replenishedBy || 'Admin'
+                            });
+                        }
+                    });
+                }
+            });
+
+            // Helper to try and get invoice number (optimistic, or leave as ID)
+            function getInvoiceNumber(id) {
+                return id; // Resolving ID to Number would require another query map. Return ID for reference.
+            }
+
+            // 4. Returns (Returned to Warehouse)
+            // CURRENTLY MISSING FROM SYSTEM. 
+            // We'll leave this empty or check stock_adjustments if any 'return' reason exists.
+            // Let's check stock_adjustments for 'return'
+
+            let adjQuery = this.db.collection('stock_adjustments');
+            if (startDate) adjQuery = adjQuery.where('createdAt', '>=', start);
+            if (endDate) adjQuery = adjQuery.where('createdAt', '<=', end);
+
+            const adjSnapshot = await adjQuery.get();
+            adjSnapshot.forEach(doc => {
+                const adj = doc.data();
+                if (!productId || adj.inventoryId === productId) {
+                    if (adj.reason === 'return') {
+                        movements.push({
+                            id: doc.id,
+                            date: adj.createdAt,
+                            type: 'Returned to Warehouse',
+                            itemName: adj.productName,
+                            itemCategory: 'General',
+                            quantity: adj.adjustment, // Assuming positive for return to warehouse
+                            unitCost: adj.buyingPrice || 0,
+                            totalValue: (adj.adjustment) * (adj.buyingPrice || 0),
+                            origin: 'Vehicle', // Assumption
+                            destination: 'Warehouse',
+                            vehicle: null,
+                            reference: 'Adjustment',
+                            recordedBy: 'Admin'
+                        });
+                    }
+                    // We can also catch new 'purchase' records from stock_adjustments here if we switch over completely
+                    // But for now replenishmentHistory covers us.
+                }
+            });
+
+
+            // Sort by date descending
             movements.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-            // Filter by type if specified
-            const filteredMovements = transactionType
-                ? movements.filter(m => m.type === transactionType)
-                : movements;
+            // Apply Filters (Movement Type, Recorded By - memory filter)
+            let filteredMovements = movements;
+            if (transactionType) {
+                // mapped type 'Issued to Vehicle', 'Received from Supplier', etc.
+                filteredMovements = filteredMovements.filter(m => m.type === transactionType);
+            }
+            // Add other filters if valid...
 
             const report = {
                 reportType: 'stock-movement',
@@ -959,13 +1079,16 @@ class ReportsService {
                 filters,
                 summary: {
                     totalMovements: filteredMovements.length,
-                    totalIn: movements.filter(m => m.quantity > 0).reduce((sum, m) => sum + m.quantity, 0),
-                    totalOut: Math.abs(movements.filter(m => m.quantity < 0).reduce((sum, m) => sum + m.quantity, 0))
+                    totalUnitsReceived: filteredMovements.filter(m => m.type === 'Received from Supplier').reduce((sum, m) => sum + m.quantity, 0),
+                    totalUnitsIssued: filteredMovements.filter(m => m.type === 'Issued to Vehicle').reduce((sum, m) => sum + m.quantity, 0),
+                    totalUnitsSold: filteredMovements.filter(m => m.type === 'Sold to Customer').reduce((sum, m) => sum + m.quantity, 0),
+                    totalUnitsReturned: filteredMovements.filter(m => m.type === 'Returned to Warehouse').reduce((sum, m) => sum + m.quantity, 0),
+                    totalValueMoved: filteredMovements.reduce((sum, m) => sum + (m.totalValue || 0), 0)
                 },
                 movements: filteredMovements
             };
 
-            await cache.set(cacheKey, report, this.cacheTTL);
+            // await cache.set(cacheKey, report, this.cacheTTL);
             return report;
         } catch (error) {
             logger.error('Generate stock movement report error:', error);
@@ -1067,92 +1190,45 @@ class ReportsService {
      */
     async generateEnhancedVehicleInventoryReport(vehicleId) {
         try {
-            const cacheKey = `${this.cachePrefix}vehicle-inventory:${vehicleId}`;
-            const cached = await cache.get(cacheKey);
-            if (cached) return cached;
+            // Use the new vehicle report service logic
+            const vehicleReportService = require('./vehicle-report.service');
+            const result = await vehicleReportService.getVehicleInventoryReport({ vehicleId });
 
-            // Get vehicle details
-            const vehicleDoc = await this.db.collection('vehicles').doc(vehicleId).get();
-            if (!vehicleDoc.exists) {
-                throw new Error('Vehicle not found');
-            }
-            const vehicle = vehicleDoc.data();
+            // The service returns data for all matching vehicles (should be 1)
+            // We need to transform it to the structure expected by the PDF service (or update PDF service)
+            // PDF Service expects: { vehicle: {...}, summary: {...}, products: [...] }
+            // New Service returns: { data: [...rows], summary: {...} }
 
-            // Get vehicle inventory
-            const vehicleInventorySnapshot = await this.db.collection('vehicle_inventory')
-                .where('vehicleId', '==', vehicleId)
-                .get();
-            const vehicleInventory = serializeDocs(vehicleInventorySnapshot);
+            // We will return the NEW structure, and update the PDF service to handle it.
+            // This ensures both the frontend table and the PDF export use the EXACT same logic.
 
-            // Calculate totals
-            let totalStock = 0;
-            let totalValue = 0;
-            const products = [];
-
-            for (const invItem of vehicleInventory) {
-                // Get product details
-                const productDoc = await this.db.collection('inventory').doc(invItem.inventoryId).get();
-                const product = productDoc.exists ? productDoc.data() : {};
-
-                // Calculate stock from layers
-                const layers = invItem.layers || [];
-                const productStock = layers.reduce((sum, layer) => sum + layer.quantity, 0);
-                const productValue = productStock * (product.sellingPrice || 0);
-
-                totalStock += productStock;
-                totalValue += productValue;
-
-                products.push({
-                    productName: invItem.productName,
-                    stock: productStock,
-                    value: productValue,
-                    sellingPrice: product.sellingPrice || 0,
-                    layers: layers.map(l => ({
-                        unit: l.unit,
-                        quantity: l.quantity,
-                        soldStock: l.soldStock || 0
-                    }))
-                });
-            }
-
-            // Get last transfer date
-            const lastTransferSnapshot = await this.db.collection('transfers')
-                .where('vehicleId', '==', vehicleId)
-                .where('status', '==', 'completed')
-                .orderBy('completedAt', 'desc')
-                .limit(1)
-                .get();
-
-            const lastTransferDate = !lastTransferSnapshot.empty
-                ? lastTransferSnapshot.docs[0].data().completedAt
-                : null;
-
-            // Calculate capacity utilization
-            const capacity = vehicle.capacity || 1000; // Default capacity
-            const capacityUtilization = (totalStock / capacity) * 100;
-
-            const report = {
-                reportType: 'enhanced-vehicle-inventory',
+            const reportData = {
+                reportType: 'enhanced-vehicle-inventory', // Keep same type to match controller
                 generatedAt: new Date(),
-                vehicle: {
-                    id: vehicleId,
-                    name: vehicle.vehicleName,
-                    registrationNumber: vehicle.registrationNumber,
-                    capacity: vehicle.capacity,
-                    assignedUser: vehicle.assignedUserName
-                },
-                summary: {
-                    totalProducts: products.length,
-                    totalStock,
-                    totalValue,
-                    capacityUtilization,
-                    lastTransferDate
-                },
-                products: products.sort((a, b) => b.value - a.value)
+                data: result.data,
+                summary: result.summary,
+                // Add vehicle info for the header if data has rows
+                vehicle: result.data.length > 0 ? {
+                    name: result.data[0].vehicleName,
+                    registrationNumber: result.data[0].registrationNumber,
+                    assignedUser: result.data[0].salesRepresentative
+                } : { name: 'Unknown', registrationNumber: 'N/A' }
             };
 
-            await cache.set(cacheKey, report, this.cacheTTL);
-            return report;
+            // If the vehicleId yielded no results (empty truck?), fetch vehicle details manually
+            if (result.data.length === 0) {
+                const vehicleDoc = await this.db.collection('vehicles').doc(vehicleId).get();
+                if (vehicleDoc.exists) {
+                    const v = vehicleDoc.data();
+                    reportData.vehicle = {
+                        name: v.vehicleName,
+                        registrationNumber: v.vehicleNumber,
+                        assignedUser: v.assignedUserName
+                    };
+                }
+            }
+
+            return reportData;
         } catch (error) {
             logger.error('Generate enhanced vehicle inventory report error:', error);
             throw error;

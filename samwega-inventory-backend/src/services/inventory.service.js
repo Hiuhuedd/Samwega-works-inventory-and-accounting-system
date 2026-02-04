@@ -597,6 +597,23 @@ class InventoryService {
                 newTotalStock: currentStock + stockToAdd
             });
 
+            // Log to stock_adjustments for unified reporting
+            await this.db.collection('stock_adjustments').add({
+                inventoryId: itemId,
+                productName: item.productName,
+                previousStock: currentStock,
+                adjustment: stockToAdd,
+                newStock: currentStock + stockToAdd,
+                reason: 'purchase', // Mapped to "Received from Supplier"
+                invoiceId,
+                buyingPrice: buyingPrice || item.buyingPrice,
+                itemCost,
+                notes: notes || 'Stock Replenishment',
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                // Add distinct 'type' if needed, but 'reason' works
+                type: 'replenishment'
+            });
+
             // Invalidate cache
             await cache.del(`${this.cachePrefix}${itemId}`);
             await cache.delPattern(`${this.cachePrefix}list:*`);

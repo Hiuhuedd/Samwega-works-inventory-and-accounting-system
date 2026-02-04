@@ -46,6 +46,16 @@ export default function ErrorModal({
             textColor: "text-blue-700",
             buttonBg: "bg-blue-600 hover:bg-blue-700",
         },
+        success: {
+            icon: AlertCircle,
+            bgColor: "bg-green-50",
+            iconBg: "bg-green-100",
+            iconColor: "text-green-500",
+            borderColor: "border-green-200",
+            titleColor: "text-green-800",
+            textColor: "text-green-700",
+            buttonBg: "bg-green-600 hover:bg-green-700",
+        },
     };
 
     const { icon: Icon, bgColor, iconBg, iconColor, borderColor, titleColor, textColor, buttonBg } = config[type] || config.warning;

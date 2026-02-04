@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2, TrendingUp, Truck, X, User, ArrowRight, ArrowLeft } from "lucide-react";
+import { Plus, Trash2, TrendingUp, Truck, X, User, ArrowRight, ArrowLeft, FileText } from "lucide-react";
 import Link from "next/link";
 import api from "../../lib/api";
 
@@ -79,78 +79,78 @@ export default function VehiclesPage() {
     }
 
     return (
-        <div className="min-h-screen bg-slate-50 p-6">
-            <div className="mx-auto max-w-7xl space-y-6">
-
-                {/* Header */}
-                <div className="flex items-center justify-between">
-                    <Link href="/dashboard" className="btn-ghost text-xs text-slate-600 hover:text-slate-900">
-                        <ArrowLeft className="mr-2 h-4 w-4" />
-                        Back
-                    </Link>
-                    <div>
-                        <h1 className="text-2xl font-bold text-slate-900">Sales Vehicles</h1>
-                        <p className="text-sm text-slate-500">Manage your fleet and track stock issuances</p>
-                    </div>
+        <>
+            {/* Header */}
+            <div className="flex items-center justify-between gap-4 text-slate-900">
+                <div>
+                    <h1 className="text-2xl font-semibold text-slate-900">Sales Vehicles</h1>
+                    <p className="text-sm text-slate-500">Manage your fleet and track stock issuances</p>
+                </div>
+                <div className="hidden items-center gap-2 md:flex">
                     <button
                         onClick={() => setShowModal(true)}
-                        className="btn-primary text-sm shadow-lg shadow-sky-200 hover:shadow-sky-300 transition-all"
+                        className="ml-2 btn-primary text-xs shadow-lg shadow-sky-200 hover:shadow-sky-300 transition-all"
                     >
-                        <Plus size={18} className="mr-2" />
+                        <Plus size={14} className="mr-1" />
                         Add Vehicle
                     </button>
                 </div>
+            </div>
 
-                {/* Vehicles Grid */}
-                <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-                    {vehicles.map((vehicle) => (
-                        <div key={vehicle.id} className="group relative overflow-hidden rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300">
-                            <div className="absolute top-0 left-0 w-1 h-full bg-sky-500"></div>
-                            <div className="p-6">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="p-3 bg-sky-50 rounded-lg text-sky-600 group-hover:bg-sky-100 transition-colors">
-                                        <Truck size={24} />
-                                    </div>
-                                    <div className="px-2 py-1 bg-slate-100 rounded text-[10px] font-mono text-slate-500 uppercase tracking-wider">
-                                        ID: {vehicle.id}
-                                    </div>
+            {/* Vehicles Grid */}
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {vehicles.map((vehicle) => (
+                    <div key={vehicle.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-all duration-300">
+                        <div className="flex items-start justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white font-bold shadow-sm">
+                                    <Truck size={20} />
                                 </div>
-
-                                <h3 className="text-lg font-bold text-slate-900 mb-1">{vehicle.vehicleName}</h3>
-                                <p className="text-sm font-mono text-slate-500 mb-4">{vehicle.vehicleNumber}</p>
-
-                                <div className="flex items-center gap-2 text-sm text-slate-600 mb-6">
-                                    <User size={14} className="text-slate-400" />
-                                    <span>{vehicle.assignedUserName || "No driver assigned"}</span>
+                                <div>
+                                    <h3 className="font-semibold text-slate-900">{vehicle.vehicleName || "Vehicle"}</h3>
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                                        {vehicle.vehicleNumber}
+                                    </span>
                                 </div>
-
-                                <Link
-                                    href={`/vehicles/${vehicle.id}`}
-                                    className="flex items-center justify-between w-full px-4 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg text-sm font-medium text-slate-700 transition-colors group-hover:text-sky-700"
-                                >
-                                    <span>Issue History</span>
-                                    <ArrowRight size={16} />
-                                </Link>
                             </div>
                         </div>
-                    ))}
 
-                    {/* Empty State / Add New Card */}
-                    {vehicles.length === 0 && (
-                        <div className="col-span-full flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-dashed border-slate-300 text-slate-400">
-                            <Truck size={48} className="mb-4 opacity-50" />
-                            <p className="text-lg font-medium text-slate-600">No vehicles found</p>
-                            <p className="text-sm mb-6">Get started by adding your first vehicle</p>
-                            <button
-                                onClick={() => setShowModal(true)}
-                                className="btn-primary text-sm"
-                            >
-                                <Plus size={18} className="mr-2" />
-                                Add Vehicle
-                            </button>
+                        {/* Driver Info */}
+                        <div className="space-y-3 mb-4">
+                            <div className="flex items-center gap-2 text-sm text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                <User size={14} className="text-slate-400" />
+                                <span className="truncate">{vehicle.assignedUserName || "No driver assigned"}</span>
+                            </div>
                         </div>
-                    )}
-                </div>
+
+                        {/* Footer Action */}
+                        <div className="border-t border-slate-100 pt-3 mt-3">
+                            <Link
+                                href={`/vehicles/${vehicle.id}`}
+                                className="flex items-center justify-center w-full px-4 py-2 bg-sky-50 hover:bg-sky-100 rounded-lg text-sm font-medium text-sky-700 transition-colors border border-sky-100"
+                            >
+                                <span>View Issue History</span>
+                                <ArrowRight size={16} className="ml-2" />
+                            </Link>
+                        </div>
+                    </div>
+                ))}
+
+                {/* Empty State / Add New Card */}
+                {vehicles.length === 0 && (
+                    <div className="col-span-full flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-dashed border-slate-300 text-slate-400">
+                        <Truck size={48} className="mb-4 opacity-50" />
+                        <p className="text-lg font-medium text-slate-600">No vehicles found</p>
+                        <p className="text-sm mb-6">Get started by adding your first vehicle</p>
+                        <button
+                            onClick={() => setShowModal(true)}
+                            className="btn-primary text-sm"
+                        >
+                            <Plus size={18} className="mr-2" />
+                            Add Vehicle
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Add Vehicle Modal */}
@@ -216,6 +216,6 @@ export default function VehiclesPage() {
                     </div>
                 </div>
             )}
-        </div>
+        </>
     );
 }

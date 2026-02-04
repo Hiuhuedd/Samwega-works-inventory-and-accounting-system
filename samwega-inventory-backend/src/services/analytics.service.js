@@ -492,6 +492,167 @@ class AnalyticsService {
     }
 
     /**
+     * Get accounting stats
+     * @param {Object} filters
+     * @returns {Promise<Object>}
+     */
+    async getAccountingStats(filters = {}) {
+        try {
+            const { startDate, endDate } = filters;
+
+            const cacheKey = `${this.cachePrefix}accounting:${JSON.stringify(filters)}`;
+            const cached = await cache.get(cacheKey);
+            if (cached) return cached;
+
+            logger.info('Starting getAccountingStats...');
+
+            // Helper to parse dates
+            const parseDate = (dateField) => {
+                if (!dateField) return null;
+                if (dateField instanceof Date) return dateField;
+                if (dateField.toDate && typeof dateField.toDate === 'function') return dateField.toDate();
+                if (dateField._seconds) return new Date(dateField._seconds * 1000); // Firestore Timestamp
+                return new Date(dateField);
+            };
+
+            // Range setup
+            const start = startDate ? new Date(startDate) : null;
+            if (start) start.setHours(0, 0, 0, 0);
+
+            const end = endDate ? new Date(endDate) : null;
+            if (end) end.setHours(23, 59, 59, 999);
+
+            // 1. Get Sales (Revenue & Selling Items)
+            // Query all completed sales first to avoid composite index issues with date range
+            logger.info('Fetching sales for accounting...');
+            const salesSnapshot = await this.db.collection('sales').where('status', '==', 'completed').get();
+            logger.info(`Sales fetched: ${salesSnapshot.size} docs`);
+
+            const sales = [];
+            salesSnapshot.forEach(doc => {
+                const sale = doc.data();
+                const saleDate = parseDate(sale.saleDate);
+
+                let include = true;
+                if (start && (!saleDate || saleDate < start)) include = false;
+                if (end && (!saleDate || saleDate > end)) include = false;
+
+                if (include) {
+                    sales.push(sale);
+                }
+            });
+            logger.info(`Sales after filtering: ${sales.length} docs`);
+
+            const totalRevenue = sales.reduce((sum, s) => sum + (s.grandTotal || 0), 0);
+
+            // Top Selling Items Logic
+            const productMap = {};
+            sales.forEach(sale => {
+                if (sale.items && Array.isArray(sale.items)) {
+                    sale.items.forEach(item => {
+                        const id = item.inventoryId;
+                        if (!productMap[id]) {
+                            productMap[id] = {
+                                id,
+                                name: item.productName || 'Unknown Product',
+                                qty: 0,
+                                revenue: 0
+                            };
+                        }
+                        productMap[id].qty += (item.quantity || 0);
+                        productMap[id].revenue += (item.totalPrice || 0);
+                    });
+                }
+            });
+            const topSellingItems = Object.values(productMap)
+                .sort((a, b) => b.revenue - a.revenue)
+                .slice(0, 5);
+
+            // 2. Get Expenses (Expenses & Top Expense Categories)
+            // Match ExpenseService: Client-side filtering to avoid index issues.
+            logger.info('Fetching expenses for accounting...');
+            const expensesSnapshot = await this.db.collection('expenses').get();
+            logger.info(`Expenses fetched: ${expensesSnapshot.size} docs`);
+
+            const expenses = [];
+            expensesSnapshot.forEach(doc => {
+                const expense = doc.data();
+                if (expense.status === 'rejected') return; // Exclude rejected
+
+                const expenseDate = parseDate(expense.expenseDate || expense.createdAt);
+
+                let include = true;
+                if (start && (!expenseDate || expenseDate < start)) include = false;
+                if (end && (!expenseDate || expenseDate > end)) include = false;
+
+                if (include) {
+                    expenses.push(expense);
+                }
+            });
+            logger.info(`Expenses after filtering: ${expenses.length} docs`);
+
+            const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+
+            // Top Expense Categories
+            const expenseCategoryMap = {};
+            expenses.forEach(e => {
+                const category = e.category || 'Other';
+                if (!expenseCategoryMap[category]) {
+                    expenseCategoryMap[category] = 0;
+                }
+                expenseCategoryMap[category] += (e.amount || 0);
+            });
+            const topExpenses = Object.entries(expenseCategoryMap)
+                .map(([category, amount]) => ({ category, amount }))
+                .sort((a, b) => b.amount - a.amount)
+                .slice(0, 5);
+
+            // 3. Get Invoices (Supplier Payments)
+            logger.info('Fetching invoices for accounting...');
+            const invoicesSnapshot = await this.db.collection('invoices').get();
+            logger.info(`Invoices fetched: ${invoicesSnapshot.size} docs`);
+
+            const invoices = [];
+            invoicesSnapshot.forEach(doc => {
+                const invoice = doc.data();
+                const invoiceDate = parseDate(invoice.createdAt || invoice.date);
+
+                let include = true;
+                if (start && (!invoiceDate || invoiceDate < start)) include = false;
+                if (end && (!invoiceDate || invoiceDate > end)) include = false;
+
+                if (include) {
+                    invoices.push(invoice);
+                }
+            });
+            logger.info(`Invoices after filtering: ${invoices.length} docs`);
+
+            const totalInvoices = invoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0);
+
+            // 4. Net Profit Calculation
+            const netProfit = totalRevenue - (totalExpenses + totalInvoices);
+            logger.info('Accounting stats calculated successfully.');
+
+            const stats = {
+                totalRevenue,
+                totalExpenses,
+                totalInvoices,
+                netProfit,
+                topSellingItems,
+                topExpenses,
+                lastUpdated: new Date()
+            };
+
+            await cache.set(cacheKey, stats, this.cacheTTL);
+            return stats;
+
+        } catch (error) {
+            logger.error('Get accounting stats error:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Group sales by period
      * @param {Array} sales
      * @param {string} groupBy

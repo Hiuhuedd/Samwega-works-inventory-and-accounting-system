@@ -166,7 +166,7 @@ export default function Dashboard() {
               Low stock
             </p>
             <div className="mt-2 flex items-end justify-between">
-              <p className="text-4xl font-semibold text-amber-700">
+              <p className="text-4xl font-semibold text-slate-900">
                 {stats.lowStock}
               </p>
               <AlertTriangle size={24} className="text-amber-300/80" />
@@ -178,7 +178,7 @@ export default function Dashboard() {
               Stock value
             </p>
             <div className="mt-2 flex items-end justify-between">
-              <p className="text-2xl font-semibold text-emerald-700">
+              <p className="text-2xl font-semibold text-slate-900">
                 KSh {stats.totalValue.toLocaleString()}
               </p>
               <TrendingUp size={24} className="text-emerald-300/80" />
@@ -190,7 +190,7 @@ export default function Dashboard() {
               Expected revenue
             </p>
             <div className="mt-2 flex items-end justify-between">
-              <p className="text-2xl font-semibold text-violet-700">
+              <p className="text-2xl font-semibold text-slate-900">
                 KSh {stats.expectedRevenue.toLocaleString()}
               </p>
               <TrendingUp size={24} className="text-violet-300/80" />
@@ -212,7 +212,7 @@ export default function Dashboard() {
               />
             </div>
 
-            <select
+            {/* <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               className="input-field h-10 max-w-[170px] text-xs"
@@ -225,7 +225,7 @@ export default function Dashboard() {
               <option value="seasoning / mchuzi mix">Seasoning</option>
               <option value="household">Household</option>
               <option value="misc">Others</option>
-            </select>
+            </select> */}
 
             <select
               value={stockFilter}
@@ -337,10 +337,7 @@ export default function Dashboard() {
 
                         {/* PROFIT */}
                         <td className="px-4 py-3 align-top text-right">
-                          <div className={`inline-flex flex-col items-end px-2 py-1 rounded text-xs font-semibold ${profit >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-700'}`}>
-                            {profit >= 0 ? '+' : ''}{profitMargin}%
-                          </div>
-                          <div className="text-[12px] text-slate-600 mt-1">KSh {profit.toFixed(2)}</div>
+                          <div className="text-lg font-semibold text-slate-900">KSh {profit.toFixed(2)}</div>
                         </td>
 
                         {/* ACTIONS */}

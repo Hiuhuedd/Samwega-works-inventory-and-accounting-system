@@ -5,48 +5,57 @@ import { useRouter } from "next/navigation";
 import { Search, Plus, Trash2, ArrowLeft, Package, Minus, Truck, CheckCircle2, AlertCircle, Scissors } from "lucide-react";
 import Link from "next/link";
 import api from "../../lib/api";
+import ErrorModal from "../../components/ErrorModal";
 
 const normalizeInventory = (data) => {
   const list = Array.isArray(data) ? data : (data?.data || []);
   return list.map(item => {
     let structure = item.packagingStructure;
-    let subUnitsPerSupplierUnit = item.subUnitsPerSupplierUnit;
 
-    if (structure && Array.isArray(structure)) {
-      structure = structure.map(l => ({ ...l }));
-      structure.forEach(layer => {
-        if (layer.stock === undefined) layer.stock = 0;
-      });
-      if (!subUnitsPerSupplierUnit && structure.length > 1) {
-        if (structure[1].qty) {
-          subUnitsPerSupplierUnit = structure[1].qty;
+    // Ensure structure is an array
+    if (!structure || !Array.isArray(structure)) {
+      if (structure && typeof structure === 'object' && structure.outer) {
+        // Legacy object format
+        structure = [
+          { unit: structure.outer.unit, stock: null, layerIndex: 0 },
+          { unit: structure.inner.unit, stock: null, layerIndex: 1 }
+        ];
+        // Add piece if needed
+        if (structure.inner.contains > 1) {
+          structure.push({ unit: 'PCS', stock: null, layerIndex: 2 });
         }
+      } else {
+        // Default simplistic structure
+        structure = [{ unit: item.supplierUnit || 'Unit', layerIndex: 0 }];
       }
-    } else if (structure && !Array.isArray(structure) && structure.outer) {
-      structure = [
-        { unit: structure.outer.unit, stock: item.stockInSupplierUnits || 0, layerIndex: 0 },
-        { unit: structure.inner.unit, stock: item.stockInSubUnits || 0, layerIndex: 1 }
-      ];
     } else {
-      structure = [];
-      structure.push({
-        unit: item.supplierUnit || 'CTN',
-        stock: item.stockInSupplierUnits || 0,
-        layerIndex: 0
-      });
-      if (item.hasSubUnits) {
-        structure.push({
-          unit: item.subUnitName || 'PCS',
-          stock: item.stockInSubUnits || 0,
-          layerIndex: 1
-        });
-      }
+      // Clone to avoid mutating original
+      structure = structure.map(l => ({ ...l }));
     }
+
+    // Calculate stock for each layer based on total pieces (item.stock)
+    // We need to know how many pieces are in each layer to divide correctly
+    const totalPieces = item.stock || 0;
+
+    structure.forEach((layer, idx) => {
+      // Calculate multiplier for this layer (how many pieces in this unit)
+      let multiplier = 1;
+
+      // Multiply qtys of all SUBSEQUENT layers
+      for (let i = idx + 1; i < structure.length; i++) {
+        multiplier *= (structure[i].qty || 1);
+      }
+
+      // Available stock for this layer is total pieces / pieces_per_unit
+      // We floor it because you can't have 0.5 cartons
+      layer.stock = Math.floor(totalPieces / multiplier);
+      layer.piecesPerUnit = multiplier; // Store for validaton/calc
+    });
 
     return {
       ...item,
       packagingStructure: structure,
-      subUnitsPerSupplierUnit: subUnitsPerSupplierUnit || item.subUnitsPerSupplierUnit
+      stock: totalPieces
     };
   });
 };
@@ -63,6 +72,7 @@ export default function IssueStockUnified() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [successModal, setSuccessModal] = useState({ open: false, message: "" });
 
   // Fetch vehicles and inventory
   useEffect(() => {
@@ -137,7 +147,8 @@ export default function IssueStockUnified() {
             layerIndex,
             unit: layer.unit,
             quantity: delta,
-            maxQty: layer.stock || 0
+            maxQty: layer.stock || 0,
+            piecesPerUnit: layer.piecesPerUnit || 1
           }]
         });
       }
@@ -153,7 +164,8 @@ export default function IssueStockUnified() {
             layerIndex,
             unit: layer.unit,
             quantity: delta,
-            maxQty: layer.stock || 0
+            maxQty: layer.stock || 0,
+            piecesPerUnit: layer.piecesPerUnit || 1
           });
         }
       } else {
@@ -286,8 +298,10 @@ export default function IssueStockUnified() {
       // Success
       setIssuedItems([]);
       setSearch("");
-      alert("Stock issued successfully!");
-      router.push(`/vehicles/${selectedVehicle}`);
+      setSuccessModal({
+        open: true,
+        message: "Stock has been successfully issued to the vehicle. The inventory has been updated."
+      });
     } catch (err) {
       console.error("Error submitting issuance", err);
       alert(`Failed: ${err.message}`);
@@ -525,6 +539,18 @@ export default function IssueStockUnified() {
         </div>
 
       </div>
+
+      {/* Success Modal */}
+      <ErrorModal
+        isOpen={successModal.open}
+        onClose={() => {
+          setSuccessModal({ open: false, message: "" });
+          router.push(`/vehicles/${selectedVehicle}`);
+        }}
+        type="success"
+        title="Success!"
+        message={successModal.message}
+      />
     </div>
   );
 }

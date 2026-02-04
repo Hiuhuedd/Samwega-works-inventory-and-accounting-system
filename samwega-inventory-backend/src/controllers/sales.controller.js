@@ -112,6 +112,32 @@ const getDailySummary = async (req, res) => {
     }
 };
 
+/**
+ * Find sales combination (KK-Calc)
+ */
+const findCombination = async (req, res) => {
+    try {
+        const result = await salesService.findSalesCombination(req.body.targetAmount);
+        return res.status(200).json(successResponse(result, 'Sales combination found'));
+    } catch (error) {
+        logger.error('Find combination controller error:', error);
+        return res.status(error.statusCode || 500).json(errorResponse(error.message, error.details));
+    }
+};
+
+/**
+ * Delete sales batch
+ */
+const deleteBatch = async (req, res) => {
+    try {
+        const result = await salesService.deleteSalesBatch(req.body.saleIds, req.user.uid);
+        return res.status(200).json(successResponse(result, 'Sales batch deleted successfully'));
+    } catch (error) {
+        logger.error('Delete batch controller error:', error);
+        return res.status(error.statusCode || 500).json(errorResponse(error.message, error.details));
+    }
+};
+
 module.exports = {
     createSale,
     getAllSales,
@@ -119,5 +145,7 @@ module.exports = {
     updateSale,
     voidSale,
     getDailySummary,
-    getStats
+    getStats,
+    findCombination,
+    deleteBatch
 };

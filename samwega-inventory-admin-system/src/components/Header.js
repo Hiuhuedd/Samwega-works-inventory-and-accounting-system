@@ -60,10 +60,22 @@ export default function Header() {
             Reports
           </Link>
           <Link
+            href="/expenses"
+            className="btn-ghost hidden text-xs font-medium lg:inline-flex"
+          >
+            Expenses
+          </Link>
+          <Link
             href="/sales-dashboard"
             className="btn-ghost hidden text-xs font-medium lg:inline-flex"
           >
             Sales Dashboard
+          </Link>
+          <Link
+            href="/accounting"
+            className="btn-ghost hidden text-xs font-medium lg:inline-flex"
+          >
+            Accounting
           </Link>
           <button
             onClick={handleLogout}

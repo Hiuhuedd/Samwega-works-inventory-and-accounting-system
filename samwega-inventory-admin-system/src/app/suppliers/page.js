@@ -194,7 +194,14 @@ export default function SuppliersPage() {
                                             {(supplier.name || "?").charAt(0).toUpperCase()}
                                         </div>
                                         <div>
-                                            <h3 className="font-semibold text-slate-900">{supplier.name}</h3>
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="font-semibold text-slate-900">{supplier.name}</h3>
+                                                {supplier.etrStatus === 'etr' && (
+                                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                                        ETR
+                                                    </span>
+                                                )}
+                                            </div>
                                             {supplier.contactPerson && (
                                                 <p className="text-xs text-slate-500">{supplier.contactPerson}</p>
                                             )}
@@ -303,6 +310,19 @@ export default function SuppliersPage() {
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
                                 <textarea value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="input-field w-full" rows={2} placeholder="Physical address" />
+                            </div>
+
+                            <div className="flex items-center gap-2 pt-2">
+                                <input
+                                    type="checkbox"
+                                    id="etrStatus"
+                                    checked={form.etrStatus === "etr"}
+                                    onChange={(e) => setForm({ ...form, etrStatus: e.target.checked ? "etr" : "non-etr" })}
+                                    className="w-4 h-4 text-sky-500 rounded focus:ring-sky-500 border-slate-300"
+                                />
+                                <label htmlFor="etrStatus" className="text-sm font-medium text-slate-700 select-none cursor-pointer">
+                                    Has ETR?
+                                </label>
                             </div>
                         </div>
 

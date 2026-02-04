@@ -61,6 +61,10 @@ const createSupplierSchema = Joi.object({
         .max(1000)
         .optional(),
 
+    etrStatus: Joi.string()
+        .valid('etr', 'non-etr')
+        .default('non-etr'),
+
     isActive: Joi.boolean()
         .default(true)
 });
@@ -80,7 +84,8 @@ const updateSupplierSchema = Joi.object({
     paymentTerms: Joi.string().valid('cash', 'credit_7days', 'credit_14days', 'credit_30days', 'credit_60days').optional(),
     creditLimit: Joi.number().min(0).optional(),
     notes: Joi.string().max(1000).optional(),
-    isActive: Joi.boolean().optional()
+    isActive: Joi.boolean().optional(),
+    etrStatus: Joi.string().valid('etr', 'non-etr').optional()
 }).min(1);
 
 /**

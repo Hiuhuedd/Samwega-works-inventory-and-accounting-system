@@ -356,6 +356,21 @@ export default function InvoicesPage() {
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>
+                                {form.supplierId && (() => {
+                                    const selectedSupplier = suppliers.find(s => s.id === form.supplierId);
+                                    if (selectedSupplier) {
+                                        const hasETR = selectedSupplier.etrStatus === 'etr';
+                                        return (
+                                            <div className={`mt-2 text-xs flex items-center gap-2 px-3 py-2 rounded-lg border ${hasETR ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+                                                <div className={`w-2 h-2 rounded-full ${hasETR ? 'bg-emerald-500' : 'bg-amber-500'}`}></div>
+                                                <span className="font-medium">
+                                                    {hasETR ? 'ETR Enabled' : 'No ETR'}
+                                                </span>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
                             </div>
 
                             {/* Invoice Date */}
