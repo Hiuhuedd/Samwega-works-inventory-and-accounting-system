@@ -372,7 +372,7 @@ class TransferService {
 
             const transfer = transferDoc.data();
 
-            if (transfer.status !== 'approved') {
+            if (transfer.status !== 'approved' && transfer.status !== 'partially_collected') {
                 throw new ValidationError(`Cannot confirm transfer with status: ${transfer.status}`);
             }
 

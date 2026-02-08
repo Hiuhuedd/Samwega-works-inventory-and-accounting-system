@@ -27,13 +27,11 @@ const createExpenseSchema = Joi.object({
         }),
 
     description: Joi.string()
-        .min(5)
         .max(500)
-        .required()
+        .optional()
+        .allow('')
         .messages({
-            'string.min': 'Description must be at least 5 characters',
-            'string.max': 'Description cannot exceed 500 characters',
-            'any.required': 'Description is required'
+            'string.max': 'Description cannot exceed 500 characters'
         }),
 
     amount: Joi.number()

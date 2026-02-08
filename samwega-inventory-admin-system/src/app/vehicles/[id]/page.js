@@ -161,25 +161,46 @@ export default function VehicleDetailsDashboard() {
     const item = inventory.find(i => i.productName === productName);
     if (!item) return 0;
 
-    // 1. Try exact layer index match (most reliable)
-    // Backend layers usually have sellingPrice
-    if (typeof layerIndex === 'number' && item.packagingStructure && item.packagingStructure[layerIndex]) {
-      const price = parseFloat(item.packagingStructure[layerIndex].sellingPrice);
-      if (price > 0) return price;
+    // Calculate Supplier Price (Cost)
+    // 1. Try buyingPricePerUnit (e.g. per piece) if available
+    let baseCost = parseFloat(item.buyingPricePerUnit) || 0;
+
+    // 2. If no per-unit price, try buyingPrice. 
+    //    We assume buyingPrice corresponds to the LARGEST unit (Layer 0) if not specified otherwise.
+    if (!baseCost && item.buyingPrice > 0) {
+      const structure = item.packagingStructure;
+      if (Array.isArray(structure) && structure.length > 0) {
+        let piecesInLayer0 = 1;
+        // Calculate total pieces in Layer 0
+        for (let i = 1; i < structure.length; i++) {
+          piecesInLayer0 *= (structure[i].qty || 1);
+        }
+        baseCost = item.buyingPrice / piecesInLayer0;
+      } else {
+        // If no structure, buyingPrice IS the base cost
+        baseCost = parseFloat(item.buyingPrice) || 0;
+      }
     }
 
-    // 2. Try unit name match (case-insensitive fuzzy match)
-    if (unit && item.packagingStructure) {
-      const layer = item.packagingStructure.find(l => l.unit?.toLowerCase() === unit.toLowerCase());
-      if (layer && layer.sellingPrice) return parseFloat(layer.sellingPrice);
+    // Now convert baseCost to the requested layer/unit cost
+    let multiplier = 1;
+    const structure = item.packagingStructure;
+
+    if (Array.isArray(structure)) {
+      // Resolve layer index
+      let idx = layerIndex;
+      if (typeof idx !== 'number' && unit) {
+        idx = structure.findIndex(l => l.unit?.toLowerCase() === unit.toLowerCase());
+      }
+
+      if (typeof idx === 'number' && idx >= 0) {
+        for (let i = idx + 1; i < structure.length; i++) {
+          multiplier *= (structure[i].qty || 1);
+        }
+      }
     }
 
-    // 3. Fallback for "pieces" or basic units
-    if (unit?.toLowerCase().includes("piece") || unit?.toLowerCase().includes("pc") || unit?.toLowerCase().includes("unit")) {
-      return parseFloat(item.sellingPricePerPiece || item.sellingPrice) || 0;
-    }
-
-    return 0;
+    return baseCost * multiplier;
   };
 
   // Filter and Stats Logic
@@ -246,10 +267,10 @@ export default function VehicleDetailsDashboard() {
             <h1 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
               {vehicle.vehicleName}
               <span className="text-sm font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                {vehicle.registrationNumber}
+                {vehicle.vehicleNumber || vehicle.registrationNumber}
               </span>
             </h1>
-            <p className="text-xs text-slate-500">Sales Rep: {vehicle.salesTeamMember || "N/A"}</p>
+            <p className="text-xs text-slate-500">Sales Rep: {vehicle.assignedUserName || vehicle.salesTeamMember || "N/A"}</p>
           </div>
 
           <div className="flex items-center gap-3">
