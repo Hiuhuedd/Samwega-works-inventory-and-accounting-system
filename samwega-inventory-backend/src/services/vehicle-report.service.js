@@ -36,13 +36,8 @@ class VehicleReportService {
      * Calculate total stock in hand for a vehicle inventory item using layers
      */
     calculateStockInHand(item, packagingStructure) {
-        if (item.stock !== undefined && item.stock !== null) return item.stock; // Legacy or simple stock support
-
-        // If layers exist, calculate from layers
-        if (item.layers && item.layers.length > 0) {
-            // Need packaging structure to calculate totals
-            if (!packagingStructure) return 0;
-
+        // Prio 1: If layers exist and we have structure, calculate from layers
+        if (item.layers && item.layers.length > 0 && packagingStructure) {
             let totalStock = 0;
             for (const layer of item.layers) {
                 const multiplier = this.calculateMultiplier(packagingStructure, layer.layerIndex);
@@ -50,6 +45,12 @@ class VehicleReportService {
             }
             return totalStock;
         }
+
+        // Prio 2: Fallback to simple stock field (Legacy support)
+        if (item.stock !== undefined && item.stock !== null) {
+            return item.stock;
+        }
+
         return 0;
     }
 

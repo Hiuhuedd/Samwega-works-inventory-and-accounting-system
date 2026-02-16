@@ -28,6 +28,19 @@ router.post(
 );
 
 /**
+ * @route   POST /api/v1/transfers/return
+ * @desc    Return stock from vehicle
+ * @access  Admin, Store Manager
+ */
+router.post(
+    '/return',
+    verifyToken,
+    requireRole('admin', 'store_manager'),
+    writeLimiter,
+    transferController.returnStock
+);
+
+/**
  * @route   GET /api/v1/transfers
  * @desc    Get all transfers
  * @access  All verified users

@@ -20,6 +20,9 @@ const { initializeFirebase } = require('./config/firebase.config');
 // Create Express app
 const app = express();
 
+// Trust proxy for rate limiting behind load balancers (e.g. Render, Heroku)
+app.set('trust proxy', 1);
+
 // Initialize services
 logger.info('🚀 Initializing Samwega Backend...');
 initializeFirebase();

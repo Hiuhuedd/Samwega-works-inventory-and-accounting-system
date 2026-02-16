@@ -13,12 +13,6 @@ export default function Dashboard() {
   const [stockFilter, setStockFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(false);
-  const [stats, setStats] = useState({
-    total: 0,
-    lowStock: 0,
-    totalValue: 0,
-    expectedRevenue: 0
-  });
 
   // Replenish modal state
   const [replenishModal, setReplenishModal] = useState({ open: false, item: null });
@@ -39,7 +33,6 @@ export default function Dashboard() {
       const response = await api.getInventory();
       if (response.success && response.data) {
         setItems(response.data);
-        calculateStats(response.data);
       }
     } catch (error) {
       console.error("Failed to fetch inventory:", error);
@@ -52,21 +45,11 @@ export default function Dashboard() {
     }
   };
 
-  const calculateStats = (inventoryData) => {
-    const lowStock = inventoryData.filter(item => item.stock <= item.reorderLevel).length;
-    const totalValue = inventoryData.reduce((sum, item) => sum + (item.stock * item.buyingPrice), 0);
-    const expectedRevenue = inventoryData.reduce((sum, item) => sum + (item.stock * item.sellingPrice), 0);
-
-    setStats({
-      total: inventoryData.length,
-      lowStock,
-      totalValue: Math.round(totalValue),
-      expectedRevenue: Math.round(expectedRevenue)
-    });
-  };
-
   // Filter items
   const filteredItems = items.filter(item => {
+    // Exclude 0 stock items by default as requested
+    if (stockFilter === "all" && item.stock === 0) return false;
+
     const matchesSearch = !search ||
       item.productName?.toLowerCase().includes(search.toLowerCase()) ||
       item.category?.toLowerCase().includes(search.toLowerCase());
@@ -79,6 +62,10 @@ export default function Dashboard() {
 
     return matchesSearch && matchesCategory && matchesStock;
   });
+
+  // Calculate dynamic stats based on filtered items
+  const stockValue = filteredItems.reduce((sum, item) => sum + (item.stock * item.buyingPrice), 0);
+  const expectedRevenue = filteredItems.reduce((sum, item) => sum + (item.stock * item.sellingPrice), 0);
 
   const handleDelete = async (id, productName) => {
     if (!confirm(`Delete "${productName}"?`)) return;
@@ -126,116 +113,48 @@ export default function Dashboard() {
           <div>
             <h1 className="text-2xl font-semibold">Inventory</h1>
           </div>
-          <div className="hidden items-center gap-2 md:flex">
-            <Link href="/invoices" className="btn-ghost text-xs flex items-center">
-              <FileText className="mr-1 h-4 w-4" />
-              Add Invoice
-            </Link>
-            <Link href="/dashboard/add" className="btn-primary text-xs">
-              <Plus className="mr-1 h-4 w-4" />
-              New item
-            </Link>
-            <Link href="/issue-stock" className="btn-ghost text-xs">
-              Issue Stock
-            </Link>
-            <Link href="/vehicles" className="btn-ghost text-xs">
-              Vehicles
-            </Link>
-            <Link href="/sales-team" className="btn-ghost text-xs">
-              Sales Team
-            </Link>
-          </div>
         </div>
 
         {/* Stats row */}
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-          <div className="glass-panel flex flex-col justify-between px-4 py-4">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-sky-600">
-              Total items
-            </p>
-            <div className="mt-2 flex items-end justify-between">
-              <p className="text-4xl font-semibold text-slate-900">
-                {stats.total}
-              </p>
-              <Package size={24} className="text-sky-400/80" />
-            </div>
-          </div>
-
-          <div className="glass-panel flex flex-col justify-between px-4 py-4">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-amber-600">
-              Low stock
-            </p>
-            <div className="mt-2 flex items-end justify-between">
-              <p className="text-4xl font-semibold text-slate-900">
-                {stats.lowStock}
-              </p>
-              <AlertTriangle size={24} className="text-amber-300/80" />
-            </div>
-          </div>
-
-          <div className="glass-panel flex flex-col justify-between px-4 py-4">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-emerald-600">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="bg-white border border-slate-200 shadow-sm rounded-lg p-5 flex flex-col justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
               Stock value
             </p>
-            <div className="mt-2 flex items-end justify-between">
-              <p className="text-2xl font-semibold text-slate-900">
-                KSh {stats.totalValue.toLocaleString()}
+            <div className="mt-3 flex items-end justify-between">
+              <p className="text-2xl font-bold text-slate-900">
+                KSh {Math.round(stockValue).toLocaleString()}
               </p>
-              <TrendingUp size={24} className="text-emerald-300/80" />
+              <TrendingUp size={20} className="text-emerald-500" />
             </div>
           </div>
 
-          <div className="glass-panel flex flex-col justify-between px-4 py-4">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-violet-600">
+          <div className="bg-white border border-slate-200 shadow-sm rounded-lg p-5 flex flex-col justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
               Expected revenue
             </p>
-            <div className="mt-2 flex items-end justify-between">
-              <p className="text-2xl font-semibold text-slate-900">
-                KSh {stats.expectedRevenue.toLocaleString()}
+            <div className="mt-3 flex items-end justify-between">
+              <p className="text-2xl font-bold text-slate-900">
+                KSh {Math.round(expectedRevenue).toLocaleString()}
               </p>
-              <TrendingUp size={24} className="text-violet-300/80" />
+              <TrendingUp size={20} className="text-violet-500" />
             </div>
           </div>
         </div>
 
         {/* Controls */}
-        <div className="glass-panel px-5 py-5 text-slate-900 text-sm">
+        <div className="bg-white border border-slate-200 shadow-sm rounded-lg p-4 text-slate-900 text-sm">
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <div className="relative w-full max-w-lg">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
               <input
                 type="text"
-                placeholder="Search by name or category"
+                placeholder="Search inventory..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="input-field pl-9 text-xs"
+                className="w-full rounded-md border border-slate-300 py-2 pl-9 pr-4 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 placeholder:text-slate-400"
               />
             </div>
-
-            {/* <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="input-field h-10 max-w-[170px] text-xs"
-            >
-              <option value="all">All categories</option>
-              <option value="sweets">Sweets</option>
-              <option value="juice">Juice</option>
-              <option value="biscuits">Biscuits</option>
-              <option value="baking ingredients">Baking ingredients</option>
-              <option value="seasoning / mchuzi mix">Seasoning</option>
-              <option value="household">Household</option>
-              <option value="misc">Others</option>
-            </select> */}
-
-            <select
-              value={stockFilter}
-              onChange={(e) => setStockFilter(e.target.value)}
-              className="input-field h-10 max-w-[150px] text-xs"
-            >
-              <option value="all">All stock</option>
-              <option value="low">Low only</option>
-              <option value="out">Out of stock</option>
-            </select>
           </div>
 
           {(search || category !== "all" || stockFilter !== "all") && (
@@ -269,12 +188,12 @@ export default function Dashboard() {
           <span>
             Showing{" "}
             <span className="font-semibold text-slate-900">{filteredItems.length}</span>{" "}
-            of {stats.total} items
+            of {items.length} items
           </span>
         </div>
 
         {/* Table */}
-        <div className="glass-panel overflow-hidden text-slate-900 text-sm">
+        <div className="bg-white border border-slate-200 shadow-sm rounded-lg overflow-hidden text-slate-900 text-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-[0.12em] text-slate-500">
@@ -298,13 +217,7 @@ export default function Dashboard() {
                     return (
                       <tr
                         key={item.id}
-                        className={
-                          isOutOfStock
-                            ? "bg-rose-50"
-                            : isLowStock
-                              ? "bg-amber-50"
-                              : "hover:bg-slate-50 transition-colors"
-                        }
+                        className="border-b border-slate-100 hover:bg-slate-50 transition-colors"
                       >
                         {/* PRODUCT NAME & CATEGORY */}
                         <td className="px-4 py-3 align-top">
@@ -343,19 +256,6 @@ export default function Dashboard() {
                         {/* ACTIONS */}
                         <td className="px-4 py-3 align-top text-center">
                           <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => setReplenishModal({ open: true, item })}
-                              className="btn-success p-2 rounded"
-                              title="Add Stock"
-                            >
-                              <PackagePlus size={14} />
-                            </button>
-                            <Link
-                              href={`/dashboard/${item.id}`}
-                              className="btn-ghost p-2 rounded text-xs"
-                            >
-                              View
-                            </Link>
                             <Link
                               href={`/dashboard/${item.id}/edit`}
                               className="btn-ghost p-2 rounded"

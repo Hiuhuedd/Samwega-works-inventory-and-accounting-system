@@ -253,6 +253,13 @@ class APIClient {
         });
     }
 
+    async returnStock(data) {
+        return this.request('/transfers/return', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
     async approveTransfer(id, data) {
         return this.request(`/transfers/${id}/approve`, {
             method: 'PUT',

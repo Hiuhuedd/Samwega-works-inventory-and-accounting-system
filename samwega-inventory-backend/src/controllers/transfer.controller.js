@@ -125,6 +125,19 @@ const getCollectedItems = async (req, res, next) => {
     }
 };
 
+/**
+ * Return stock from vehicle
+ */
+const returnStock = async (req, res, next) => {
+    try {
+        const result = await transferService.returnStock(req.body, req.user.uid);
+        res.json(successResponse(result, 'Stock returned successfully'));
+    } catch (error) {
+        logger.error('Return stock controller error:', error);
+        next(error);
+    }
+};
+
 module.exports = {
     createTransfer,
     getAllTransfers,
@@ -134,5 +147,6 @@ module.exports = {
     collectTransferLayer,
     breakUnit,
     getPendingTransfers,
-    getCollectedItems
+    getCollectedItems,
+    returnStock
 };

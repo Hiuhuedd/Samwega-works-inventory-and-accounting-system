@@ -19,7 +19,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import api from "../../lib/api";
-import Header from "../../components/Header";
+
 import DeleteSaleModal from "../../components/KKCalcModal";
 
 
@@ -191,57 +191,51 @@ export default function SalesDashboard() {
         fetchData();
     };
 
-    const StatCard = ({ title, value, subValue, icon: Icon, color }) => (
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <div className="flex justify-between items-start mb-4">
-                <div className={`p-3 rounded-lg ${color}`}>
-                    <Icon size={24} className="text-white" />
-                </div>
+    const StatCard = ({ title, value, subValue }) => (
+        <div className="bg-white p-4 rounded-lg border border-slate-200">
+            <h3 className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-2">{title}</h3>
+            <div className="flex items-baseline justify-between">
+                <p className="text-2xl font-semibold text-slate-900">{value}</p>
                 {subValue && (
-                    <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1">
+                    <span className="text-xs font-medium text-emerald-600 flex items-center gap-0.5">
                         <ArrowUpRight size={12} />
                         {subValue}
                     </span>
                 )}
             </div>
-            <h3 className="text-slate-500 text-sm font-medium uppercase tracking-wider mb-1">{title}</h3>
-            <p className="text-2xl font-bold text-slate-900">{value}</p>
         </div>
     );
 
     return (
         <div className="min-h-screen bg-slate-50 font-sans">
-            <Header />
+
             <div className="p-6">
                 <div className="mx-auto max-w-[1600px] space-y-6">
 
                     {/* Header */}
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div>
-                            <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                                <LayoutDashboard className="text-sky-600" />
+                            <h1 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
                                 Sales Dashboard
                             </h1>
-                            <p className="text-slate-500 text-sm mt-1">Overview of sales performance and transactions</p>
                         </div>
 
                         <div className="flex items-center gap-3">
                             <button
                                 onClick={() => setIsDeleteModalOpen(true)}
                                 disabled={selectedSales.length === 0}
-                                className="flex items-center gap-2 bg-rose-50 text-rose-600 px-4 py-2 rounded-lg font-medium hover:bg-rose-100 transition-colors border border-rose-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="flex items-center gap-2 bg-white text-rose-600 px-3 py-1.5 rounded border border-rose-200 text-sm font-medium hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
-                                <Trash2 size={16} />
-                                Delete {selectedSales.length > 0 ? `(${selectedSales.length})` : 'Sale'}
+                                <Trash2 size={14} />
+                                Delete {selectedSales.length > 0 ? `(${selectedSales.length})` : ''}
                             </button>
 
-                            <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
+                            <div className="flex items-center gap-2 bg-white px-2 py-1.5 rounded border border-slate-200">
                                 <div className="relative">
-                                    <Truck className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                                     <select
                                         value={selectedVehicle}
                                         onChange={(e) => setSelectedVehicle(e.target.value)}
-                                        className="pl-10 pr-8 py-2 bg-slate-50 border-none rounded-md text-sm text-slate-700 focus:ring-2 focus:ring-sky-500 outline-none appearance-none cursor-pointer hover:bg-slate-100 transition-colors"
+                                        className="py-1 bg-transparent border-none text-sm text-slate-700 focus:ring-0 cursor-pointer"
                                     >
                                         <option value="">All Vehicles</option>
                                         {vehicles.map(v => (
@@ -249,28 +243,21 @@ export default function SalesDashboard() {
                                         ))}
                                     </select>
                                 </div>
-                                <div className="h-8 w-px bg-slate-200"></div>
+                                <div className="h-4 w-px bg-slate-200"></div>
                                 <div className="flex items-center gap-2">
-                                    <div className="relative">
-                                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                                        <input
-                                            type="date"
-                                            value={startDate}
-                                            onChange={(e) => setStartDate(e.target.value)}
-                                            className="pl-10 pr-4 py-2 bg-slate-50 border-none rounded-md text-sm text-slate-700 focus:ring-2 focus:ring-sky-500 outline-none cursor-pointer hover:bg-slate-100 transition-colors w-40"
-                                            placeholder="From"
-                                        />
-                                    </div>
-                                    <span className="text-slate-400 text-sm">to</span>
-                                    <div className="relative">
-                                        <input
-                                            type="date"
-                                            value={endDate}
-                                            onChange={(e) => setEndDate(e.target.value)}
-                                            className="pl-4 pr-4 py-2 bg-slate-50 border-none rounded-md text-sm text-slate-700 focus:ring-2 focus:ring-sky-500 outline-none cursor-pointer hover:bg-slate-100 transition-colors w-40"
-                                            placeholder="To"
-                                        />
-                                    </div>
+                                    <input
+                                        type="date"
+                                        value={startDate}
+                                        onChange={(e) => setStartDate(e.target.value)}
+                                        className="py-1 bg-transparent border-none text-sm text-slate-700 focus:ring-0 cursor-pointer w-32"
+                                    />
+                                    <span className="text-slate-400 text-xs">-</span>
+                                    <input
+                                        type="date"
+                                        value={endDate}
+                                        onChange={(e) => setEndDate(e.target.value)}
+                                        className="py-1 bg-transparent border-none text-sm text-slate-700 focus:ring-0 cursor-pointer w-32"
+                                    />
                                 </div>
                                 {(selectedVehicle || startDate || endDate) && (
                                     <button
@@ -290,50 +277,40 @@ export default function SalesDashboard() {
                     </div>
 
                     {/* Stats Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                         <StatCard
                             title="Total Revenue"
                             value={`KSh ${stats?.totalRevenue?.toLocaleString() || 0}`}
-                            subValue={`${stats?.saleCount || 0} sales`}
-                            icon={Banknote}
-                            color="bg-sky-500"
+                            subValue={`${stats?.totalTransactions || 0} sales`}
                         />
                         <StatCard
                             title="Cash Sales"
                             value={`KSh ${stats?.paymentMethods?.cash?.toLocaleString() || 0}`}
-                            icon={Banknote}
-                            color="bg-emerald-500"
                         />
                         <StatCard
                             title="M-Pesa Sales"
                             value={`KSh ${stats?.paymentMethods?.mpesa?.toLocaleString() || 0}`}
-                            icon={Smartphone}
-                            color="bg-violet-500"
                         />
                         <StatCard
                             title="Bank Sales"
                             value={`KSh ${stats?.paymentMethods?.bank?.toLocaleString() || 0}`}
-                            icon={Landmark}
-                            color="bg-blue-500"
                         />
                         <StatCard
                             title="Debt Sales"
                             value={`KSh ${stats?.paymentMethods?.credit?.toLocaleString() || 0}`}
-                            icon={Clock}
-                            color="bg-amber-500"
                         />
                     </div>
 
                     {/* Sales Table */}
-                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                        <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-                            <h2 className="text-lg font-bold text-slate-900">Recent Transactions</h2>
+                    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden mt-6">
+                        <div className="p-4 border-b border-slate-200 flex justify-between items-center">
+                            <h2 className="text-base font-semibold text-slate-900">Recent Transactions</h2>
                             <div className="relative w-64">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                                 <input
                                     type="text"
                                     placeholder="Search sales..."
-                                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-sky-500"
+                                    className="w-full pl-9 pr-4 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:border-slate-400"
                                 />
                             </div>
                         </div>
@@ -342,33 +319,33 @@ export default function SalesDashboard() {
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
                                     <tr>
-                                        <th className="px-6 py-4 w-12">
+                                        <th className="px-6 py-3 w-12">
                                             <input
                                                 type="checkbox"
                                                 checked={selectedSales.length === sales.length && sales.length > 0}
                                                 onChange={toggleSelectAll}
-                                                className="w-4 h-4 text-rose-600 border-slate-300 rounded focus:ring-rose-500 cursor-pointer"
+                                                className="w-4 h-4 text-slate-600 border-slate-300 rounded focus:ring-slate-500 cursor-pointer"
                                             />
                                         </th>
-                                        <th className="px-6 py-4">Receipt Number</th>
-                                        <th className="px-6 py-4">Date & Time</th>
-                                        <th className="px-6 py-4">Vehicle</th>
-                                        <th className="px-6 py-4">Items</th>
-                                        <th className="px-6 py-4">Payment</th>
-                                        <th className="px-6 py-4 text-right">Amount</th>
+                                        <th className="px-6 py-3 font-medium">Receipt</th>
+                                        <th className="px-6 py-3 font-medium">Date</th>
+                                        <th className="px-6 py-3 font-medium">Vehicle</th>
+                                        <th className="px-6 py-3 font-medium">Items</th>
+                                        <th className="px-6 py-3 font-medium">Payment</th>
+                                        <th className="px-6 py-3 text-right font-medium">Amount</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {loading ? (
                                         <tr>
                                             <td colSpan="7" className="px-6 py-12 text-center text-slate-500">
-                                                Loading sales data...
+                                                Loading...
                                             </td>
                                         </tr>
                                     ) : sales.length === 0 ? (
                                         <tr>
                                             <td colSpan="7" className="px-6 py-12 text-center text-slate-500">
-                                                No sales found matching your filters.
+                                                No sales found.
                                             </td>
                                         </tr>
                                     ) : (
@@ -378,71 +355,65 @@ export default function SalesDashboard() {
                                             return (
                                                 <tr
                                                     key={sale.id}
-                                                    className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-rose-50' : ''}`}
+                                                    className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-slate-50' : ''}`}
                                                 >
-                                                    <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                                                    <td className="px-6 py-3" onClick={(e) => e.stopPropagation()}>
                                                         <input
                                                             type="checkbox"
                                                             checked={isSelected}
                                                             onChange={() => toggleSaleSelection(sale.id)}
-                                                            className="w-4 h-4 text-rose-600 border-slate-300 rounded focus:ring-rose-500 cursor-pointer"
+                                                            className="w-4 h-4 text-slate-600 border-slate-300 rounded focus:ring-slate-500 cursor-pointer"
                                                         />
                                                     </td>
                                                     <td
-                                                        className="px-6 py-4 font-mono text-slate-600 cursor-pointer"
+                                                        className="px-6 py-3 font-mono text-slate-600 cursor-pointer text-xs"
                                                         onClick={() => router.push(`/sales/${sale.id}`)}
                                                     >
                                                         {sale.receiptNumber || `#${sale.id.substring(0, 8)}`}
                                                     </td>
                                                     <td
-                                                        className="px-6 py-4 text-slate-900 cursor-pointer"
+                                                        className="px-6 py-3 text-slate-900 cursor-pointer"
                                                         onClick={() => router.push(`/sales/${sale.id}`)}
                                                     >
-                                                        <div className="font-medium">
+                                                        <div className="text-sm">
                                                             {convertTimestamp(sale.saleDate)?.toLocaleDateString() || 'N/A'}
                                                         </div>
-                                                        <div className="text-xs text-slate-500">
+                                                        <div className="text-xs text-slate-400">
                                                             {convertTimestamp(sale.saleDate)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || ''}
                                                         </div>
                                                     </td>
                                                     <td
-                                                        className="px-6 py-4 cursor-pointer"
+                                                        className="px-6 py-3 cursor-pointer"
                                                         onClick={() => router.push(`/sales/${sale.id}`)}
                                                     >
-                                                        <div className="flex items-center gap-2">
-                                                            <Truck size={14} className="text-slate-400" />
-                                                            <span className="text-slate-700">
-                                                                {vehicle ? vehicle.vehicleName : 'Unknown Vehicle'}
-                                                            </span>
+                                                        <span className="text-slate-700">
+                                                            {vehicle ? vehicle.vehicleName : '-'}
+                                                        </span>
+                                                    </td>
+                                                    <td
+                                                        className="px-6 py-3 cursor-pointer"
+                                                        onClick={() => router.push(`/sales/${sale.id}`)}
+                                                    >
+                                                        <div className="text-slate-700 truncate max-w-[200px]" title={sale.items.map(i => i.productName).join(', ')}>
+                                                            {sale.items[0]?.productName} {sale.items.length > 1 && <span className="text-slate-400 text-xs">+{sale.items.length - 1}</span>}
                                                         </div>
                                                     </td>
                                                     <td
-                                                        className="px-6 py-4 cursor-pointer"
+                                                        className="px-6 py-3 cursor-pointer"
                                                         onClick={() => router.push(`/sales/${sale.id}`)}
                                                     >
-                                                        <div className="text-slate-700">
-                                                            {sale.items.length} items
-                                                        </div>
-                                                        <div className="text-xs text-slate-500 truncate max-w-[200px]" title={sale.items.map(i => i.productName).join(', ')}>
-                                                            {sale.items[0]?.productName} {sale.items.length > 1 && `+${sale.items.length - 1} more`}
-                                                        </div>
-                                                    </td>
-                                                    <td
-                                                        className="px-6 py-4 cursor-pointer"
-                                                        onClick={() => router.push(`/sales/${sale.id}`)}
-                                                    >
-                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
-                                                        ${sale.paymentMethod === 'cash' ? 'bg-emerald-100 text-emerald-800' :
-                                                                sale.paymentMethod === 'mpesa' ? 'bg-violet-100 text-violet-800' :
-                                                                    'bg-amber-100 text-amber-800'}`}>
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize border
+                                                        ${sale.paymentMethod === 'cash' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                                                                sale.paymentMethod === 'mpesa' ? 'bg-violet-50 text-violet-700 border-violet-100' :
+                                                                    'bg-amber-50 text-amber-700 border-amber-100'}`}>
                                                             {sale.paymentMethod}
                                                         </span>
                                                     </td>
                                                     <td
-                                                        className="px-6 py-4 text-right font-bold text-slate-900 cursor-pointer"
+                                                        className="px-6 py-3 text-right font-medium text-slate-900 cursor-pointer"
                                                         onClick={() => router.push(`/sales/${sale.id}`)}
                                                     >
-                                                        KSh {parseFloat(sale.grandTotal).toLocaleString()}
+                                                        {parseFloat(sale.grandTotal).toLocaleString()}
                                                     </td>
                                                 </tr>
                                             );

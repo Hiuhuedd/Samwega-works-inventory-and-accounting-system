@@ -1,55 +1,52 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Plus, Trash2, ArrowLeft, Package, Minus, Truck, CheckCircle2, AlertCircle, Scissors } from "lucide-react";
+import { Search, Plus, Trash2, ArrowLeft, Package, Truck, AlertCircle, Save } from "lucide-react";
 import Link from "next/link";
 import api from "../../lib/api";
-import ErrorModal from "../../components/ErrorModal";
+// ErrorModal removed as per request for simpler alerts
 
+// Helper to normalize inventory data
 const normalizeInventory = (data) => {
   const list = Array.isArray(data) ? data : (data?.data || []);
   return list.map(item => {
     let structure = item.packagingStructure;
 
-    // Ensure structure is an array
+    // Standardize structure to array if not already
     if (!structure || !Array.isArray(structure)) {
       if (structure && typeof structure === 'object' && structure.outer) {
-        // Legacy object format
         structure = [
           { unit: structure.outer.unit, stock: null, layerIndex: 0 },
           { unit: structure.inner.unit, stock: null, layerIndex: 1 }
         ];
-        // Add piece if needed
         if (structure.inner.contains > 1) {
           structure.push({ unit: 'PCS', stock: null, layerIndex: 2 });
         }
       } else {
-        // Default simplistic structure
         structure = [{ unit: item.supplierUnit || 'Unit', layerIndex: 0 }];
       }
     } else {
-      // Clone to avoid mutating original
+      // Clone array to avoid mutation issues
       structure = structure.map(l => ({ ...l }));
     }
 
-    // Calculate stock for each layer based on total pieces (item.stock)
-    // We need to know how many pieces are in each layer to divide correctly
+    // Ensure every layer has a valid integer layerIndex
+    structure = structure.map((l, i) => ({
+      ...l,
+      layerIndex: (l.layerIndex !== undefined && l.layerIndex !== null)
+        ? parseInt(l.layerIndex)
+        : i
+    }));
+
     const totalPieces = item.stock || 0;
-
     structure.forEach((layer, idx) => {
-      // Calculate multiplier for this layer (how many pieces in this unit)
       let multiplier = 1;
-
-      // Multiply qtys of all SUBSEQUENT layers
       for (let i = idx + 1; i < structure.length; i++) {
         multiplier *= (structure[i].qty || 1);
       }
-
-      // Available stock for this layer is total pieces / pieces_per_unit
-      // We floor it because you can't have 0.5 cartons
       layer.stock = Math.floor(totalPieces / multiplier);
-      layer.piecesPerUnit = multiplier; // Store for validaton/calc
+      layer.piecesPerUnit = multiplier;
     });
 
     return {
@@ -63,494 +60,499 @@ const normalizeInventory = (data) => {
 export default function IssueStockUnified() {
   const router = useRouter();
 
+  // Data State
   const [vehicles, setVehicles] = useState([]);
-  const [selectedVehicle, setSelectedVehicle] = useState("");
   const [inventory, setInventory] = useState([]);
-  const [filteredInventory, setFilteredInventory] = useState([]);
-  const [search, setSearch] = useState("");
-  const [issuedItems, setIssuedItems] = useState([]);
+
+  // Mode & Selection
+  const [transferMode, setTransferMode] = useState('issue'); // 'issue' | 'return'
+  const [selectedVehicle, setSelectedVehicle] = useState("");
+
+  // Issue Mode State
+  const [issuedItems, setIssuedItems] = useState([]); // Items to issue
+
+  // Return Mode State
+  const [returnItems, setReturnItems] = useState([]); // Items in vehicle to return
+
+  // UI State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [successModal, setSuccessModal] = useState({ open: false, message: "" });
 
-  // Fetch vehicles and inventory
+  // Fetch Initial Data (Vehicles & Main Inventory)
   useEffect(() => {
     const fetchData = async () => {
-      // Fetch vehicles
       try {
-        const vehiclesResponse = await api.getVehicles();
-        // Response is: { success, message, data: { vehicles: [...], pagination: {...} } }
-        const vList = vehiclesResponse?.data?.vehicles || vehiclesResponse?.vehicles || vehiclesResponse?.data || [];
+        const [vehiclesRes, inventoryRes] = await Promise.all([
+          api.getVehicles(),
+          api.getInventory()
+        ]);
+
+        const vList = vehiclesRes?.data?.vehicles || vehiclesRes?.vehicles || vehiclesRes?.data || [];
         setVehicles(Array.isArray(vList) ? vList : []);
-      } catch (err) {
-        console.error("Failed to fetch vehicles:", err);
-      }
 
-      // Fetch inventory
-      try {
-        const inventoryData = await api.getInventory();
-        const normalizedInventory = normalizeInventory(inventoryData);
-        setInventory(normalizedInventory);
-        setFilteredInventory(normalizedInventory);
-      } catch (err) {
-        console.error("Failed to fetch inventory:", err);
-        setError(err.message);
-      }
+        const normalized = normalizeInventory(inventoryRes);
+        setInventory(normalized);
 
-      setLoading(false);
+      } catch (err) {
+        console.error("Failed to load data:", err);
+        setError("Failed to load required data.");
+      } finally {
+        setLoading(false);
+      }
     };
-
     fetchData();
   }, []);
 
-  // Search filter
+  const loadVehicleInventory = useCallback(async () => {
+    // Wait for inventory to load first to ensure we can calculate structure
+    if (inventory.length === 0 || !selectedVehicle) return;
+
+    setLoading(true);
+    try {
+      console.log(`[FE] Fetching inventory for vehicle: ${selectedVehicle}`);
+      const res = await api.getVehicleInventory(selectedVehicle);
+      const items = res.data?.items || res.items || res?.data || [];
+      console.log('[FE] Raw Vehicle Inventory Items:', items);
+
+      // Initialize return items with normalized data
+      const mapped = items.map(item => {
+        // Find corresponding item in main inventory to get structure
+        const mainItem = inventory.find(inv => inv.id === item.inventoryId || inv.id === item.id);
+
+        let calculatedStock = 0;
+        // Calculate stock from layers if available
+        if (item.layers && Array.isArray(item.layers) && mainItem?.packagingStructure) {
+          item.layers.forEach(layer => {
+            const structLayer = mainItem.packagingStructure.find(l => l.layerIndex === layer.layerIndex);
+            // piecesPerUnit is calculated in normalizeInventory
+            const multiplier = structLayer?.piecesPerUnit || 1;
+            calculatedStock += (layer.quantity || 0) * multiplier;
+          });
+        } else {
+          // Fallback to existing property if layers or main item not found
+          calculatedStock = item.quantity !== undefined ? item.quantity : (item.stock || 0);
+        }
+
+        return {
+          ...item,
+          productName: item.productName || mainItem?.productName || 'Unknown', // Ensure name
+          returnQty: '',
+          stock: calculatedStock,
+          maxReturn: calculatedStock,
+          unit: item.unit || mainItem?.packagingStructure?.[0]?.unit || 'Pieces'
+        };
+      });
+
+      console.log('[FE] Mapped Vehicle Inventory:', mapped);
+      setReturnItems(mapped);
+    } catch (e) {
+      console.error("Failed to load vehicle inventory", e);
+      setReturnItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedVehicle, inventory]);
+
+  // Fetch Vehicle Inventory when in Return Mode
   useEffect(() => {
-    if (search.trim()) {
-      const term = search.toLowerCase();
+    if (transferMode === 'return' && selectedVehicle) {
+      loadVehicleInventory();
+    } else {
+      setReturnItems([]);
+    }
+  }, [transferMode, selectedVehicle, loadVehicleInventory]);
+
+  // Search Logic (Issue Mode)
+  useEffect(() => {
+    if (transferMode === 'issue' && searchQuery.trim().length > 1) {
+      const term = searchQuery.toLowerCase();
       const filtered = inventory.filter(
         (item) =>
           item.productName?.toLowerCase().includes(term) ||
           item.category?.toLowerCase().includes(term)
-      );
-      setFilteredInventory(filtered);
+      ).slice(0, 5);
+      setSearchResults(filtered);
     } else {
-      setFilteredInventory(inventory);
+      setSearchResults([]);
     }
-  }, [search, inventory]);
+  }, [searchQuery, inventory, transferMode]);
 
-  // --- CART LOGIC ---
+  // Handlers - Issue Mode
+  const handleAddIssueItem = (item) => {
+    const defaultLayer = item.packagingStructure.find(l => l.stock > 0) || item.packagingStructure[0];
+    const initialLayerIndex = defaultLayer.layerIndex !== undefined ? defaultLayer.layerIndex : 0;
 
-  const getCartItem = (inventoryId) => {
-    return issuedItems.find(i => i.inventoryId === inventoryId);
+    const newItem = {
+      internalId: Date.now(),
+      inventoryId: item.id,
+      productName: item.productName,
+      category: item.category,
+      packagingStructure: item.packagingStructure,
+      selectedLayerIndex: initialLayerIndex,
+      quantity: 1,
+      maxStock: defaultLayer.stock,
+      unit: defaultLayer.unit
+    };
+
+    setIssuedItems(prev => [...prev, newItem]);
+    setSearchQuery("");
+    setSearchResults([]);
   };
 
-  const getLayerInCart = (inventoryId, layerIndex) => {
-    const item = getCartItem(inventoryId);
-    if (!item) return null;
-    return item.layers.find(l => l.layerIndex === layerIndex);
-  };
+  const handleUpdateIssueRow = (id, field, value) => {
+    setIssuedItems(prev => prev.map(row => {
+      if (row.internalId !== id) return row;
 
-  const handleUpdateQuantity = (item, layerIndex, delta) => {
-    const layer = item.packagingStructure[layerIndex];
-    const existingItemIndex = issuedItems.findIndex(i => i.inventoryId === item.id);
-
-    let newItems = [...issuedItems];
-
-    if (existingItemIndex === -1) {
-      // Item not in cart, add it if delta > 0
-      if (delta > 0) {
-        newItems.push({
-          inventoryId: item.id,
-          productName: item.productName,
-          layers: [{
-            layerIndex,
-            unit: layer.unit,
-            quantity: delta,
-            maxQty: layer.stock || 0,
-            piecesPerUnit: layer.piecesPerUnit || 1
-          }]
-        });
+      if (field === 'quantity') {
+        return { ...row, quantity: parseInt(value) || 0 };
       }
-    } else {
-      // Item exists
-      const existingItem = newItems[existingItemIndex];
-      const existingLayerIndex = existingItem.layers.findIndex(l => l.layerIndex === layerIndex);
 
-      if (existingLayerIndex === -1) {
-        // Layer not in cart, add it if delta > 0
-        if (delta > 0) {
-          existingItem.layers.push({
-            layerIndex,
-            unit: layer.unit,
-            quantity: delta,
-            maxQty: layer.stock || 0,
-            piecesPerUnit: layer.piecesPerUnit || 1
-          });
-        }
-      } else {
-        // Layer exists, update qty
-        const currentQty = existingItem.layers[existingLayerIndex].quantity;
-        const newQty = currentQty + delta;
-
-        if (newQty <= 0) {
-          // Remove layer
-          existingItem.layers.splice(existingLayerIndex, 1);
-          // If no layers left, remove item
-          if (existingItem.layers.length === 0) {
-            newItems.splice(existingItemIndex, 1);
-          }
-        } else {
-          // Update qty (respect max)
-          existingItem.layers[existingLayerIndex].quantity = Math.min(newQty, layer.stock || 0);
-        }
+      if (field === 'unit') {
+        const layerIndex = parseInt(value);
+        const layer = row.packagingStructure.find(l => l.layerIndex === layerIndex);
+        return {
+          ...row,
+          selectedLayerIndex: layerIndex,
+          unit: layer.unit,
+          maxStock: layer.stock,
+          quantity: 1
+        };
       }
-    }
-
-    setIssuedItems(newItems);
+      return row;
+    }));
   };
 
-  const handleSetQuantity = (item, layerIndex, quantity) => {
-    const inventoryItem = inventory.find(i => i.id === item.inventoryId);
-    if (!inventoryItem) return;
+  const handleRemoveIssueRow = (id) => {
+    setIssuedItems(prev => prev.filter(r => r.internalId !== id));
+  };
 
-    const layer = inventoryItem.packagingStructure[layerIndex];
-    const maxStock = layer.stock || 0;
-    const newQty = Math.max(0, Math.min(quantity, maxStock));
-
-    let newItems = [...issuedItems];
-    const existingItemIndex = newItems.findIndex(i => i.inventoryId === item.inventoryId);
-
-    if (existingItemIndex !== -1) {
-      const existingItem = newItems[existingItemIndex];
-      const existingLayerIndex = existingItem.layers.findIndex(l => l.layerIndex === layerIndex);
-
-      if (existingLayerIndex !== -1) {
-        if (newQty <= 0) {
-          existingItem.layers.splice(existingLayerIndex, 1);
-          if (existingItem.layers.length === 0) {
-            newItems.splice(existingItemIndex, 1);
-          }
-        } else {
-          existingItem.layers[existingLayerIndex].quantity = newQty;
-        }
+  // Handlers - Return Mode
+  const handleUpdateReturnQty = (inventoryId, value) => {
+    setReturnItems(prev => prev.map(item => {
+      if (item.inventoryId === inventoryId || item.id === inventoryId) { // handle id vs inventoryId mismatch if any
+        return { ...item, returnQty: value === '' ? '' : parseInt(value) };
       }
-    }
-    setIssuedItems(newItems);
+      return item;
+    }));
   };
 
-  const handleBreakUnit = async (item) => {
-    const masterUnit = item.packagingStructure[0]?.unit || 'Unit';
-    if (!confirm(`Are you sure you want to break 1 ${masterUnit} of ${item.productName}?`)) return;
+  const handleIssueSubmit = async () => {
+    if (!selectedVehicle) return alert("Please select a vehicle.");
+    if (issuedItems.length === 0) return alert("Please add items to issue.");
 
-    try {
-      await api.request(`/inventory/${item.id}/break`, {
-        method: 'POST',
-        body: JSON.stringify({ quantity: 1 })
-      });
-
-      // Refresh inventory
-      const invData = await api.getInventory();
-      const normalizedInventory = normalizeInventory(invData);
-
-      setInventory(normalizedInventory);
-    } catch (err) {
-      alert(err.message);
-    }
-  };
-
-  const handleRemoveItem = (inventoryId) => {
-    setIssuedItems(issuedItems.filter(i => i.inventoryId !== inventoryId));
-  };
-
-  const getTotalQuantity = () => {
-    return issuedItems.reduce((sum, item) =>
-      sum + item.layers.reduce((layerSum, layer) => layerSum + layer.quantity, 0), 0
-    );
-  };
-
-  const handleSubmitIssuance = async () => {
-    if (!selectedVehicle) {
-      alert("Please select a vehicle");
-      return;
-    }
-    if (issuedItems.length === 0) {
-      alert("Please select at least one item");
-      return;
+    for (const item of issuedItems) {
+      if (item.quantity <= 0) return alert(`Invalid quantity for ${item.productName}`);
+      if (item.quantity > item.maxStock) return alert(`Insufficient stock for ${item.productName} (${item.unit}). Max: ${item.maxStock}`);
     }
 
     setSubmitting(true);
-
-    // Helper to normalize unit names to match backend validator
-    const normalizeUnit = (unit, layerIndex) => {
-      if (!unit) {
-        // Default based on layer index
-        return layerIndex === 0 ? 'carton' : layerIndex === 1 ? 'box' : 'piece';
-      }
-      const unitLower = unit.toLowerCase();
-      if (unitLower.includes('carton') || unitLower.includes('ctn')) return 'carton';
-      if (unitLower.includes('box') || unitLower.includes('pack')) return 'box';
-      if (unitLower.includes('piece') || unitLower.includes('pcs') || unitLower.includes('unit')) return 'piece';
-      // Default based on layer
-      return layerIndex === 0 ? 'carton' : layerIndex === 1 ? 'box' : 'piece';
-    };
-
     try {
+      const itemMap = new Map();
+      issuedItems.forEach(row => {
+        if (!itemMap.has(row.inventoryId)) {
+          itemMap.set(row.inventoryId, { inventoryId: row.inventoryId, layers: [] });
+        }
+        const entry = itemMap.get(row.inventoryId);
+        const existingLayer = entry.layers.find(l => l.layerIndex === row.selectedLayerIndex);
+
+        if (existingLayer) {
+          existingLayer.quantity += row.quantity;
+        } else {
+          entry.layers.push({
+            layerIndex: row.selectedLayerIndex ?? 0,
+            quantity: row.quantity,
+            unit: row.unit
+          });
+        }
+      });
+
       const payload = {
         vehicleId: selectedVehicle,
-        items: issuedItems.map(item => ({
-          inventoryId: item.inventoryId,
-          layers: item.layers.map(l => ({
-            layerIndex: l.layerIndex,
-            quantity: l.quantity,
-            unit: normalizeUnit(l.unit, l.layerIndex)
-          }))
-        }))
+        items: Array.from(itemMap.values())
       };
 
-      console.log("Submitting transfer payload:", payload);
+      await api.createTransfer(payload); // Updated API method call
 
-      await api.request('/transfers', {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-
-      // Success
+      alert("Stock has been successfully issued to the vehicle.");
+      // Optional: Refresh or redirect
+      // router.push(`/vehicles/${selectedVehicle}`);
       setIssuedItems([]);
-      setSearch("");
-      setSuccessModal({
-        open: true,
-        message: "Stock has been successfully issued to the vehicle. The inventory has been updated."
-      });
-    } catch (err) {
-      console.error("Error submitting issuance", err);
-      alert(`Failed: ${err.message}`);
+      setSelectedVehicle(""); // Reset selection to force "fresh" state
+    } catch (e) {
+      console.error("Issue failed", e);
+      alert("Failed to issue stock: " + e.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-300 border-t-sky-600" />
-          <p className="text-sm text-slate-500">Loading data…</p>
-        </div>
-      </div>
-    );
-  }
+  const handleReturnSubmit = async () => {
+    if (!selectedVehicle) return alert("Please select a vehicle.");
+    const itemsToReturn = returnItems.filter(i => i.returnQty && i.returnQty > 0);
+
+    if (itemsToReturn.length === 0) return alert("Please enter quantities to return.");
+
+    // Validate
+    for (const item of itemsToReturn) {
+      if (item.returnQty > item.maxReturn) {
+        return alert(`Return quantity for ${item.productName} exceeds vehicle stock (${item.maxReturn}).`);
+      }
+    }
+
+    setSubmitting(true);
+    try {
+      const payload = {
+        vehicleId: selectedVehicle,
+        items: itemsToReturn.map(item => ({
+          inventoryId: item.inventoryId || item.id,
+          quantity: parseInt(item.returnQty),
+          unit: item.unit,
+          layerIndex: item.layerIndex || 0
+        }))
+      };
+
+      await api.returnStock(payload);
+
+      alert("Stock successfully returned to inventory.");
+      // Refresh return list
+      await loadVehicleInventory();
+    } catch (e) {
+      console.error("Return failed", e);
+      alert("Failed to return stock: " + e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading && !vehicles.length) return <div className="p-10 text-center text-slate-500">Loading...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 lg:p-6 flex flex-col gap-6">
+    <div className="w-full max-w-7xl mx-auto p-6 space-y-6 font-sans">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/dashboard" className="btn-ghost text-xs">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back
+          <Link href="/dashboard" className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
+            <ArrowLeft size={20} />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Issue Stock</h1>
-            <p className="text-xs text-slate-500">Quickly issue items to vehicles</p>
+            <h1 className="text-xl font-semibold text-slate-900">Transfer Stock</h1>
+            <p className="text-slate-500 text-sm">Manage vehicle inventory transfers</p>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-140px)]">
+      {/* Mode Toggle */}
+      <div className="flex bg-slate-100 p-1 rounded-lg w-fit">
+        <button
+          onClick={() => { setTransferMode('issue'); setSelectedVehicle(''); }}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${transferMode === 'issue'
+            ? 'bg-white shadow text-slate-900'
+            : 'text-slate-500 hover:text-slate-700'
+            }`}
+        >
+          Issue to Vehicle
+        </button>
+        <button
+          onClick={() => { setTransferMode('return'); setSelectedVehicle(''); }}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${transferMode === 'return'
+            ? 'bg-white shadow text-slate-900'
+            : 'text-slate-500 hover:text-slate-700'
+            }`}
+        >
+          Return from Vehicle
+        </button>
+      </div>
 
-        {/* LEFT COLUMN: Vehicle Selection (3 cols) */}
-        <div className="lg:col-span-3 flex flex-col gap-4 h-full overflow-hidden">
-          <div className="glass-panel p-4 flex-1 flex flex-col overflow-hidden">
-            <h2 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
-              <Truck size={16} className="text-sky-600" />
-              Select Vehicle
-            </h2>
-            <div className="overflow-y-auto space-y-2 pr-2 flex-1">
-              {vehicles.map((v) => (
-                <div
-                  key={v.id}
-                  onClick={() => setSelectedVehicle(v.id)}
-                  className={`cursor-pointer rounded-lg border p-3 transition-all ${selectedVehicle === v.id
-                    ? "border-sky-600 bg-sky-50 ring-1 ring-sky-600"
-                    : "border-slate-200 bg-white hover:border-sky-300"
-                    }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-900 text-sm">{v.vehicleName}</span>
-                    {selectedVehicle === v.id && <CheckCircle2 className="text-sky-600" size={16} />}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1 font-mono">{v.registrationNumber}</p>
+      {/* Vehicle Selection */}
+      <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-6 w-full">
+        <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider mb-3">
+          {transferMode === 'issue' ? 'Select Target Vehicle' : 'Select Source Vehicle'}
+        </h2>
+        <div className="max-w-md">
+          <select
+            value={selectedVehicle}
+            onChange={(e) => setSelectedVehicle(e.target.value)}
+            className="w-full h-10 px-3 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-400 text-sm bg-white"
+          >
+            <option value="">-- Choose Vehicle --</option>
+            {vehicles.map(v => (
+              <option key={v.id} value={v.id}>{v.vehicleName} ({v.registrationNumber})</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* ISSUE MODE UI */}
+      {transferMode === 'issue' && selectedVehicle && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          {/* Search Bar */}
+          <div className="bg-white border border-slate-200 rounded-lg p-4 relative z-20">
+            <div className="relative max-w-md">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search item to add..."
+                className="w-full pl-11 pr-4 py-2.5 rounded-lg border border-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-400 text-sm"
+              />
+              {/* Results Dropdown */}
+              {searchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden z-30">
+                  {searchResults.map(item => (
+                    <button
+                      key={item.id}
+                      onClick={() => handleAddIssueItem(item)}
+                      className="w-full text-left px-4 py-3 hover:bg-slate-50 flex justify-between items-center group"
+                    >
+                      <div>
+                        <div className="font-medium text-slate-800 text-sm">{item.productName}</div>
+                        <div className="text-xs text-slate-500">{item.category}</div>
+                      </div>
+                      <div className="text-right text-xs text-slate-500">
+                        Stock: {item.packagingStructure[0]?.stock} {item.packagingStructure[0]?.unit}
+                      </div>
+                    </button>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           </div>
-        </div>
 
-        {/* MIDDLE COLUMN: Inventory Browser (6 cols) */}
-        <div className="lg:col-span-6 flex flex-col gap-4 h-full overflow-hidden">
-          <div className="glass-panel p-4 flex-1 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                <Package size={16} className="text-sky-600" />
-                Inventory
-              </h2>
-              <div className="relative w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                <input
-                  type="text"
-                  placeholder="Search products..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-4 text-xs focus:border-sky-500 focus:outline-none"
-                  autoFocus
-                />
-              </div>
-            </div>
-
-            <div className="overflow-y-auto pr-2 flex-1 space-y-3">
-              {filteredInventory.map((item) => (
-                <div key={item.id} className="rounded-lg border border-slate-200 bg-white p-3 hover:shadow-sm transition-shadow">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <h3 className="font-semibold text-slate-900 text-sm">{item.productName}</h3>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-wider">{item.category}</p>
-                    </div>
-                    {item.packagingStructure && item.packagingStructure.length > 1 && item.subUnitsPerSupplierUnit > 0 && (
-                      <button
-                        onClick={() => handleBreakUnit(item)}
-                        className="text-xs flex items-center gap-1 text-amber-600 hover:text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200"
-                        title="Break 1 Master Unit into Sub Units"
+          {/* Items Table */}
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 w-[30%]">Product</th>
+                  <th className="px-4 py-3 w-[20%]">Unit</th>
+                  <th className="px-4 py-3 w-[15%]">Available</th>
+                  <th className="px-4 py-3 w-[15%]">Issue Qty</th>
+                  <th className="px-4 py-3 w-[10%] text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {issuedItems.map((row) => (
+                  <tr key={row.internalId} className="hover:bg-slate-50">
+                    <td className="px-4 py-2 font-medium text-slate-900">{row.productName}</td>
+                    <td className="px-4 py-2">
+                      <select
+                        value={row.selectedLayerIndex}
+                        onChange={(e) => handleUpdateIssueRow(row.internalId, 'unit', e.target.value)}
+                        className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-slate-600"
                       >
-                        <Scissors size={12} />
-                        Break {item.packagingStructure[0].unit}
+                        {row.packagingStructure.map(layer => (
+                          <option key={layer.layerIndex} value={layer.layerIndex}>{layer.unit}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-2 text-slate-500">{row.maxStock}</td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max={row.maxStock}
+                        value={row.quantity}
+                        onChange={(e) => handleUpdateIssueRow(row.internalId, 'quantity', e.target.value)}
+                        className="w-20 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-center focus:outline-none focus:border-slate-400"
+                      />
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      <button onClick={() => handleRemoveIssueRow(row.internalId)} className="text-slate-400 hover:text-rose-500 transition-colors">
+                        <Trash2 size={16} />
                       </button>
-                    )}
-                  </div>
+                    </td>
+                  </tr>
+                ))}
+                {issuedItems.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
+                      <Package size={40} className="mx-auto mb-3 opacity-50" />
+                      <p>No items added yet. Use search above.</p>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
-                  {/* Quick Add Layers */}
-                  <div className="flex flex-wrap gap-2">
-                    {item.packagingStructure.map((layer, idx) => {
-                      const isMeasurement = /\b(KG|G|ML|L)\b/.test(layer.unit?.toUpperCase() || "");
-                      if (isMeasurement || layer.stock === null) return null;
-
-                      const cartLayer = getLayerInCart(item.id, idx);
-                      const qtyInCart = cartLayer ? cartLayer.quantity : 0;
-                      const maxStock = layer.stock || 0;
-
-                      return (
-                        <div key={idx} className={`flex items-center rounded-md border text-xs ${qtyInCart > 0 ? 'border-sky-200 bg-sky-50' : 'border-slate-200 bg-slate-50'}`}>
-                          <div className="px-2 py-1.5 border-r border-inherit">
-                            <span className="font-bold text-slate-700">{maxStock}</span>
-                            <span className="text-slate-500 ml-1">{layer.unit}</span>
-                          </div>
-
-                          {qtyInCart === 0 ? (
-                            <button
-                              onClick={() => handleUpdateQuantity(item, idx, 1)}
-                              disabled={maxStock === 0}
-                              className="px-3 py-1.5 font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            >
-                              Add
-                            </button>
-                          ) : (
-                            <div className="flex items-center">
-                              <button
-                                onClick={() => handleUpdateQuantity(item, idx, -1)}
-                                className="px-2 py-1.5 hover:bg-sky-200 text-sky-700 transition-colors"
-                              >
-                                <Minus size={12} />
-                              </button>
-                              <span className="w-6 text-center font-bold text-sky-800">{qtyInCart}</span>
-                              <button
-                                onClick={() => handleUpdateQuantity(item, idx, 1)}
-                                disabled={qtyInCart >= maxStock}
-                                className="px-2 py-1.5 hover:bg-sky-200 text-sky-700 disabled:opacity-50 transition-colors"
-                              >
-                                <Plus size={12} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-              {filteredInventory.length === 0 && (
-                <div className="text-center py-10 text-slate-400 text-sm">
-                  No items found.
-                </div>
-              )}
-            </div>
+          <div className="flex justify-end pt-4">
+            <button
+              onClick={handleIssueSubmit}
+              disabled={submitting || issuedItems.length === 0}
+              className="bg-slate-900 text-white px-8 py-3 rounded-lg text-sm font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors flex items-center gap-2"
+            >
+              {submitting ? 'Issuing...' : <><Save size={18} /> Confirm Issue</>}
+            </button>
           </div>
         </div>
+      )}
 
-        {/* RIGHT COLUMN: Cart & Action (3 cols) */}
-        <div className="lg:col-span-3 flex flex-col gap-4 h-full overflow-hidden">
-          <div className="glass-panel p-4 flex-1 flex flex-col overflow-hidden border-2 border-sky-100">
-            <h2 className="text-sm font-semibold text-slate-900 mb-4 flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <CheckCircle2 size={16} className="text-emerald-600" />
-                To Issue
-              </span>
-              <span className="bg-sky-100 text-sky-700 text-xs font-bold px-2 py-0.5 rounded-full">{issuedItems.length}</span>
-            </h2>
+      {/* RETURN MODE UI */}
+      {transferMode === 'return' && selectedVehicle && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-800 text-sm flex gap-2">
+            <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
+            <p>You are viewing items currently loaded in the vehicle. Enter quantities to return back to the main inventory.</p>
+          </div>
 
-            <div className="overflow-y-auto flex-1 space-y-3 pr-1">
-              {issuedItems.length > 0 ? (
-                issuedItems.map((item) => (
-                  <div key={item.inventoryId} className="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-xs font-bold text-slate-900 line-clamp-1">{item.productName}</span>
-                      <button onClick={() => handleRemoveItem(item.inventoryId)} className="text-rose-400 hover:text-rose-600">
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                    <div className="space-y-1">
-                      {item.layers.map((l, i) => (
-                        <div key={i} className="flex justify-between items-center text-xs bg-slate-50 px-2 py-1 rounded">
-                          <span className="text-slate-600">{l.unit}</span>
-                          <div className="flex items-center gap-1">
-                            <span className="text-slate-400 text-[10px]">x</span>
-                            <input
-                              type="number"
-                              min="1"
-                              value={l.quantity}
-                              onChange={(e) => handleSetQuantity(item, l.layerIndex, parseInt(e.target.value) || 0)}
-                              className="w-12 text-right font-mono font-bold text-slate-900 bg-transparent border-b border-slate-300 focus:border-sky-500 focus:outline-none p-0"
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs text-center p-4 border-2 border-dashed border-slate-100 rounded-lg">
-                  <Package size={32} className="mb-2 opacity-50" />
-                  <p>Select items from the inventory list to add them here.</p>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-slate-200">
-              <div className="flex justify-between items-center mb-4">
-                <span className="text-xs text-slate-500">Total Units</span>
-                <span className="text-lg font-bold text-slate-900">{getTotalQuantity()}</span>
-              </div>
-
-              {!selectedVehicle && (
-                <div className="mb-3 flex items-center gap-2 text-xs text-amber-600 bg-amber-50 p-2 rounded">
-                  <AlertCircle size={14} />
-                  Select a vehicle first
-                </div>
-              )}
-
-              <button
-                onClick={handleSubmitIssuance}
-                disabled={submitting || !selectedVehicle || issuedItems.length === 0}
-                className="w-full btn-primary py-3 text-sm font-bold shadow-lg shadow-sky-200 disabled:shadow-none"
-              >
-                {submitting ? "Issuing..." : "Confirm Issue"}
-              </button>
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+            <div className="max-h-[500px] overflow-y-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-3 w-[40%]">Product</th>
+                    <th className="px-4 py-3 w-[20%]">Unit</th>
+                    <th className="px-4 py-3 w-[20%] text-center">In Vehicle</th>
+                    <th className="px-4 py-3 w-[20%] text-center">Return Qty</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {returnItems.map((item) => (
+                    <tr key={item.inventoryId || item.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-2 font-medium text-slate-900">{item.productName}</td>
+                      <td className="px-4 py-2 text-slate-600">{item.unit}</td>
+                      <td className="px-4 py-2 text-center font-medium">{item.stock}</td>
+                      <td className="px-4 py-2 text-center">
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.maxReturn}
+                          value={item.returnQty}
+                          placeholder="0"
+                          onChange={(e) => handleUpdateReturnQty(item.inventoryId || item.id, e.target.value)}
+                          className="w-24 bg-white border border-slate-200 rounded px-2 py-1 text-center focus:outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                  {returnItems.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-12 text-center text-slate-400">
+                        <Truck size={40} className="mx-auto mb-3 opacity-50" />
+                        <p>No items found in this vehicle.</p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
+
+          <div className="flex justify-end pt-4">
+            <button
+              onClick={handleReturnSubmit}
+              disabled={submitting || !returnItems.some(i => i.returnQty > 0)}
+              className="bg-emerald-600 text-white px-8 py-3 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm shadow-emerald-200"
+            >
+              {submitting ? 'Processing...' : <><Save size={18} /> Confirm Return</>}
+            </button>
+          </div>
         </div>
-
-      </div>
-
-      {/* Success Modal */}
-      <ErrorModal
-        isOpen={successModal.open}
-        onClose={() => {
-          setSuccessModal({ open: false, message: "" });
-          router.push(`/vehicles/${selectedVehicle}`);
-        }}
-        type="success"
-        title="Success!"
-        message={successModal.message}
-      />
+      )}
     </div>
   );
 }

@@ -384,6 +384,8 @@ class VehicleService {
                 .where('vehicleId', '==', vehicleId)
                 .get();
 
+            logger.info(`VehicleService.getVehicleInventory: Found ${snapshot.size} items for vehicle ${vehicleId}`);
+
             const inventory = serializeDocs(snapshot);
             return inventory;
         } catch (error) {

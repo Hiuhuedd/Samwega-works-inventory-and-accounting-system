@@ -157,50 +157,108 @@ export default function VehicleDetailsDashboard() {
     });
   };
 
-  const getPrice = (productName, unit, layerIndex) => {
-    const item = inventory.find(i => i.productName === productName);
-    if (!item) return 0;
+  const getPrice = (item, layer) => {
+    // 1. Try finding by ID first
+    let inventoryItem = null;
+    if (item.inventoryId) {
+      inventoryItem = inventory.find(i => i.id === item.inventoryId || i._id === item.inventoryId);
+    }
 
-    // Calculate Supplier Price (Cost)
-    // 1. Try buyingPricePerUnit (e.g. per piece) if available
-    let baseCost = parseFloat(item.buyingPricePerUnit) || 0;
+    // 2. Fallback to name
+    if (!inventoryItem && item.productName) {
+      inventoryItem = inventory.find(i => i.productName?.trim().toLowerCase() === item.productName?.trim().toLowerCase());
+    }
 
-    // 2. If no per-unit price, try buyingPrice. 
-    //    We assume buyingPrice corresponds to the LARGEST unit (Layer 0) if not specified otherwise.
-    if (!baseCost && item.buyingPrice > 0) {
-      const structure = item.packagingStructure;
+    if (!inventoryItem) return 0;
+
+    // 3. Determine Base Price (Price Per Smallest Unit/Piece)
+    // Priority: sellingPricePerUnit -> sellingPrice (calc) -> buyingPricePerUnit -> buyingPrice (calc)
+    let basePrice = parseFloat(inventoryItem.sellingPricePerUnit) || 0;
+
+    // If no per-unit selling price, derive from Selling Price (Layer 0)
+    if (!basePrice && inventoryItem.sellingPrice > 0) {
+      const structure = inventoryItem.packagingStructure;
       if (Array.isArray(structure) && structure.length > 0) {
         let piecesInLayer0 = 1;
-        // Calculate total pieces in Layer 0
         for (let i = 1; i < structure.length; i++) {
           piecesInLayer0 *= (structure[i].qty || 1);
         }
-        baseCost = item.buyingPrice / piecesInLayer0;
+        basePrice = inventoryItem.sellingPrice / piecesInLayer0;
       } else {
-        // If no structure, buyingPrice IS the base cost
-        baseCost = parseFloat(item.buyingPrice) || 0;
+        basePrice = parseFloat(inventoryItem.sellingPrice) || 0;
       }
     }
 
-    // Now convert baseCost to the requested layer/unit cost
-    let multiplier = 1;
-    const structure = item.packagingStructure;
-
-    if (Array.isArray(structure)) {
-      // Resolve layer index
-      let idx = layerIndex;
-      if (typeof idx !== 'number' && unit) {
-        idx = structure.findIndex(l => l.unit?.toLowerCase() === unit.toLowerCase());
-      }
-
-      if (typeof idx === 'number' && idx >= 0) {
-        for (let i = idx + 1; i < structure.length; i++) {
-          multiplier *= (structure[i].qty || 1);
+    // Fallback to Buying Price if Selling Price is 0/Missing
+    if (basePrice === 0) {
+      let costPrice = parseFloat(inventoryItem.buyingPricePerUnit) || 0;
+      if (!costPrice && inventoryItem.buyingPrice > 0) {
+        const structure = inventoryItem.packagingStructure;
+        if (Array.isArray(structure) && structure.length > 0) {
+          let piecesInLayer0 = 1;
+          for (let i = 1; i < structure.length; i++) {
+            piecesInLayer0 *= (structure[i].qty || 1);
+          }
+          costPrice = inventoryItem.buyingPrice / piecesInLayer0;
+        } else {
+          costPrice = parseFloat(inventoryItem.buyingPrice) || 0;
         }
       }
+      basePrice = costPrice;
     }
 
-    return baseCost * multiplier;
+    // 4. Convert basePrice to requested unit
+    let multiplier = 1;
+    const structure = inventoryItem.packagingStructure;
+    const unit = layer.unit;
+    const layerIndex = layer.layerIndex;
+
+    // Helper for fuzzy unit matching
+    const normalize = (u) => {
+      if (!u) return "";
+      const s = u.toLowerCase().trim();
+      if (s === 'pcs' || s === 'piece' || s === 'pieces' || s === 'pc') return 'piece';
+      if (s === 'ctn' || s === 'carton' || s === 'box' || s === 'boxes') return 'carton';
+      return s;
+    };
+
+    if (Array.isArray(structure) && structure.length > 0) {
+      // Resolve layer index
+      let idx = layerIndex;
+
+      // If no valid numeric index, try matching by unit name
+      if ((typeof idx !== 'number' || idx < 0) && unit) {
+        // 1. Exact match
+        idx = structure.findIndex(l => l.unit?.toLowerCase() === unit?.toLowerCase());
+
+        // 2. Fuzzy match
+        if (idx === -1) {
+          const normUnit = normalize(unit);
+          idx = structure.findIndex(l => normalize(l.unit) === normUnit);
+        }
+      }
+
+      // 3. Fallback: If unit looks like "piece" but not found, assume Base Unit (last layer)
+      if ((idx === -1 || idx === undefined) && normalize(unit) === 'piece') {
+        idx = structure.length - 1;
+      }
+      // 4. Fallback: If unit looks like "carton" but not found, assume Top Layer (0)?
+      if ((idx === -1 || idx === undefined) && normalize(unit) === 'carton') {
+        idx = 0;
+      }
+
+      // If we found a valid layer index
+      if (typeof idx === 'number' && idx >= 0 && idx < structure.length) {
+        // Calculate pieces in this specific layer
+        let piecesInThisLayer = 1;
+        for (let i = idx + 1; i < structure.length; i++) {
+          piecesInThisLayer *= (structure[i].qty || 1);
+        }
+        multiplier = piecesInThisLayer;
+      }
+    }
+
+    return basePrice * multiplier;
   };
 
   // Filter and Stats Logic
@@ -213,17 +271,29 @@ export default function VehicleDetailsDashboard() {
   const stats = filteredTransfers.reduce((acc, transfer) => {
     if (transfer.items) {
       transfer.items.forEach(item => {
-        if (item.layers) {
+        if (item.layers && item.layers.length > 0) {
           item.layers.forEach(layer => {
-            const price = getPrice(item.productName, layer.unit, layer.layerIndex);
+            const price = getPrice(item, layer);
             const total = price * layer.quantity;
             acc.issued += total;
-            if (layer.collected) {
+            if (transfer.status === 'collected') {
               acc.collected += total;
             } else {
               acc.pending += total;
             }
           });
+        }
+        // Fallback for items without layers
+        else if (item.quantity) {
+          const layer = { unit: item.unit || '', quantity: item.quantity, layerIndex: -1 };
+          const price = getPrice(item, layer);
+          const total = price * item.quantity;
+          acc.issued += total;
+          if (transfer.status === 'collected') {
+            acc.collected += total;
+          } else {
+            acc.pending += total;
+          }
         }
       });
     }
@@ -332,113 +402,96 @@ export default function VehicleDetailsDashboard() {
           </div>
         </div>
 
-        {/* Transfers Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
-          {filteredTransfers.length > 0 ? (
-            filteredTransfers.map((transfer) => {
-              let transferTotal = 0;
+        {/* Transfers List (Table) */}
+        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-medium">
+              <tr>
+                <th className="px-4 py-3 w-32">Date</th>
+                <th className="px-4 py-3 w-32">Transfer</th>
+                <th className="px-4 py-3">Item</th>
+                <th className="px-4 py-3 w-24">Quantity</th>
+                <th className="px-4 py-3 w-32 text-right">Total Value</th>
+                <th className="px-4 py-3 w-24 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredTransfers.length > 0 ? (
+                filteredTransfers.map((transfer) => {
+                  let transferTotal = 0;
+                  // Calculate total beforehand and prepare renderer
+                  if (transfer.items) {
+                    transfer.items.forEach(item => {
+                      if (item.layers && item.layers.length > 0) {
+                        item.layers.forEach((layer) => {
+                          const price = getPrice(item, layer);
+                          transferTotal += price * layer.quantity;
+                        });
+                      } else if (item.quantity) {
+                        // Fallback
+                        const layer = { unit: item.unit || '', quantity: item.quantity, layerIndex: -1 };
+                        const price = getPrice(item, layer);
+                        transferTotal += price * item.quantity;
+                      }
+                    });
+                  }
 
-              return (
-                <div key={transfer.id} className="bg-white shadow-lg shadow-slate-200/50 border border-slate-200 rounded-none relative overflow-hidden font-mono text-sm">
-                  {/* Receipt Top Edge Decoration */}
-                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-sky-400 to-blue-500"></div>
-
-                  {/* Receipt Header */}
-                  <div className="p-4 border-b border-dashed border-slate-200 bg-slate-50/50">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="flex items-center gap-2 text-sky-700 mb-1">
-                          <Receipt size={14} />
-                          <span className="text-[10px] font-bold uppercase tracking-wider">Transfer</span>
+                  return (
+                    <tr key={transfer.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 text-slate-600 align-top">
+                        <div className="font-medium text-slate-900">{new Date(transfer.createdAt).toLocaleDateString()}</div>
+                        <div className="text-xs text-slate-400">{new Date(transfer.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500 align-top">
+                        {transfer.transferNumber || transfer.id?.substring(0, 8)}
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <div className="space-y-1">
+                          {transfer.items?.map((item, idx) => (
+                            <div key={idx} className="text-xs text-slate-700 h-6 flex items-center">
+                              <span className="font-medium truncate">{item.productName}</span>
+                            </div>
+                          ))}
                         </div>
-                        <p className="text-[10px] text-slate-400">#{transfer.transferNumber || transfer.id?.substring(0, 8)}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs font-bold text-slate-900">
-                          {new Date(transfer.createdAt).toLocaleDateString()}
-                        </p>
-                        <p className="text-[10px] text-slate-500">
-                          {new Date(transfer.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Grid Header */}
-                  <div className="grid grid-cols-12 gap-1 px-4 py-2 bg-slate-100 text-[9px] uppercase font-bold text-slate-500 tracking-wider border-b border-slate-200">
-                    <div className="col-span-1 text-center">Qty</div>
-                    <div className="col-span-2">Unit</div>
-                    <div className="col-span-6">Item</div>
-                    <div className="col-span-3 text-right">Total</div>
-                  </div>
-
-                  {/* Items Grid */}
-                  <div className="divide-y divide-dashed divide-slate-100">
-                    {transfer.items?.map((item) => (
-                      item.layers?.map((layer, lIdx) => {
-                        const price = getPrice(item.productName, layer.unit, layer.layerIndex !== undefined ? layer.layerIndex : lIdx);
-                        const lineTotal = price * layer.quantity;
-                        transferTotal += lineTotal;
-
-                        return (
-                          <div key={`${item.inventoryId}-${lIdx}`} className="grid grid-cols-12 gap-1 px-4 py-2 items-center hover:bg-slate-50 transition-colors">
-                            <div className="col-span-1 text-center font-bold text-slate-900">{layer.quantity}</div>
-                            <div className="col-span-2 text-slate-500 truncate text-[10px]">{layer.unit}</div>
-                            <div className="col-span-6 font-medium text-slate-800 truncate text-[11px]" title={item.productName}>{item.productName}</div>
-                            <div className="col-span-3 text-right font-bold text-slate-900">{price > 0 ? lineTotal.toLocaleString() : '-'}</div>
-                          </div>
-                        );
-                      })
-                    ))}
-                  </div>
-
-                  {/* Receipt Footer */}
-                  <div className="p-4 bg-slate-50 border-t border-slate-200">
-                    <div className="flex justify-between items-end">
-                      <div className="text-[10px] text-slate-500 space-y-2">
-                        <p>Status: <span className={`font-semibold uppercase ${transfer.status === 'collected' ? 'text-emerald-600' : transfer.status === 'approved' ? 'text-sky-600' : 'text-amber-600'}`}>{transfer.status}</span></p>
-                        {transfer.status === 'pending' && (
-                          <button
-                            onClick={() => handleApproveTransfer(transfer.id)}
-                            className="px-3 py-1.5 bg-amber-600 text-white text-[10px] rounded hover:bg-amber-700 font-semibold"
-                          >
-                            ✓ Approve Transfer
-                          </button>
-                        )}
-                        {transfer.status === 'approved' && (
-                          <button
-                            onClick={() => handleConfirmTransfer(transfer.id)}
-                            className="px-3 py-1.5 bg-sky-600 text-white text-[10px] rounded hover:bg-sky-700 font-semibold"
-                          >
-                            ✓ Confirm Collection
-                          </button>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Total</p>
-                        <p className="text-lg font-bold text-slate-900">KSh {transferTotal.toLocaleString()}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Receipt jagged bottom */}
-                  <div className="h-3 bg-slate-100 relative overflow-hidden">
-                    <div className="absolute top-0 left-0 right-0 h-2 bg-[linear-gradient(45deg,transparent_33.333%,#ffffff_33.333%,#ffffff_66.667%,transparent_66.667%),linear-gradient(-45deg,transparent_33.333%,#ffffff_33.333%,#ffffff_66.667%,transparent_66.667%)] bg-[length:10px_16px] bg-[position:0_0]"></div>
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="col-span-full py-16 text-center bg-white rounded-xl border border-dashed border-slate-300">
-              <Package className="mx-auto mb-3 text-slate-300" size={48} />
-              <p className="text-slate-500">No transfers found {dateFilter ? "for this date" : ""}.</p>
-              {dateFilter && (
-                <button onClick={() => setDateFilter("")} className="text-sky-600 hover:underline mt-2 text-sm">
-                  Clear date filter
-                </button>
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <div className="space-y-1">
+                          {transfer.items?.map((item, idx) => (
+                            <div key={idx} className="text-xs text-slate-500 h-6 flex items-center">
+                              {item.layers && item.layers.length > 0 ? (
+                                item.layers.map(l => `${l.quantity} ${l.unit}`).join(', ')
+                              ) : (
+                                // Fallback display
+                                `${item.quantity || '-'} ${item.unit || ''}`
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-slate-900 align-top">
+                        KSh {transferTotal.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-center align-top">
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium capitalize
+                          ${transfer.status === 'collected' ? 'bg-emerald-100 text-emerald-700' :
+                            transfer.status === 'approved' ? 'bg-blue-100 text-blue-700' :
+                              'bg-amber-100 text-amber-700'}`}>
+                          {transfer.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                    <Package className="mx-auto mb-3 text-slate-300" size={32} />
+                    <p>No transfers found.</p>
+                  </td>
+                </tr>
               )}
-            </div>
-          )}
+            </tbody>
+          </table>
         </div>
       </div>
 

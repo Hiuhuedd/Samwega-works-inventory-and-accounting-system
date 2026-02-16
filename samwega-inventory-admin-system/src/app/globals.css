@@ -7,10 +7,9 @@
   html,
   body {
     @apply antialiased;
-    /* Darker brand background using OKLCH */
-    background-color: oklch(25% 0.12 278.697);
-    color: #e5e7eb;
-    /* light grey for any text not inside cards */
+    /* Clean light background */
+    background-color: #f8fafc;
+    color: #0f172a;
     font-size: 16px;
     line-height: 1.5;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
@@ -86,12 +85,13 @@
 
 /* Remove up/down spinners from number inputs */
 @layer base {
+
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
   }
-  
+
   input[type="number"] {
     -moz-appearance: textfield;
   }

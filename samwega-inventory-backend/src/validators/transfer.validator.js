@@ -23,10 +23,8 @@ const transferLayerSchema = Joi.object({
         }),
 
     unit: Joi.string()
-        .valid('carton', 'box', 'piece')
         .required()
         .messages({
-            'any.only': 'Unit must be carton, box, or piece',
             'any.required': 'Unit is required'
         })
 });

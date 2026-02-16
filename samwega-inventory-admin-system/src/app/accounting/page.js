@@ -14,7 +14,7 @@ import {
     DollarSign
 } from "lucide-react";
 import api from "../../lib/api";
-import Header from "../../components/Header";
+
 
 export default function AccountingDashboard() {
     const [stats, setStats] = useState(null);
@@ -79,7 +79,7 @@ export default function AccountingDashboard() {
 
     return (
         <div className="min-h-screen bg-slate-50 font-sans">
-            <Header />
+
             <div className="p-6">
                 <div className="mx-auto max-w-[1600px] space-y-6">
 

@@ -167,6 +167,10 @@ class TransferService {
 
             logger.info(`Transfer created: ${transferNumber}`, { id: docRef.id, vehicleId });
 
+            // Auto-approve the transfer immediately
+            logger.info(`Auto-approving transfer: ${transferNumber}`);
+            await this.approveTransfer(docRef.id, userId);
+
             // Invalidate cache
             await cache.delPattern(`${this.cachePrefix}*`);
 
@@ -688,6 +692,142 @@ class TransferService {
             };
         } catch (error) {
             logger.error('Break unit error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Return stock from vehicle to main inventory
+     * @param {Object} returnData
+     * @param {string} userId
+     * @returns {Promise<Object>}
+     */
+    async returnStock(returnData, userId) {
+        try {
+            const { vehicleId, items, notes = '' } = returnData;
+
+            const vehicle = await vehicleService.getVehicleById(vehicleId);
+            const userDoc = await this.db.collection('users').doc(userId).get();
+            const userData = userDoc.exists ? userDoc.data() : { email: 'System' };
+            const userName = userData.fullName || userData.email;
+
+            // Generate transfer number
+            const transferNumber = await this.generateTransferNumber();
+
+            await this.db.runTransaction(async (transaction) => {
+                // Reads
+                const vehicleInventoryQueries = [];
+                const inventoryRefs = [];
+
+                for (const item of items) {
+                    const q = this.db.collection(this.vehicleInventoryCollection)
+                        .where('vehicleId', '==', vehicleId)
+                        .where('inventoryId', '==', item.inventoryId)
+                        .limit(1);
+                    vehicleInventoryQueries.push(transaction.get(q));
+                    inventoryRefs.push(this.db.collection('inventory').doc(item.inventoryId));
+                }
+
+                const vehicleInventorySnapshots = await Promise.all(vehicleInventoryQueries);
+                const inventoryDocs = await transaction.getAll(...inventoryRefs);
+
+                const finalItems = [];
+
+                // Writes
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    const vehicleSnapshot = vehicleInventorySnapshots[i];
+                    const inventoryDoc = inventoryDocs[i];
+
+                    if (vehicleSnapshot.empty) {
+                        throw new ValidationError(`Item not found in vehicle inventory: ${item.inventoryId}`);
+                    }
+                    if (!inventoryDoc.exists) {
+                        throw new NotFoundError(`Main inventory item: ${item.inventoryId}`);
+                    }
+
+                    const vehicleInvDoc = vehicleSnapshot.docs[0];
+                    const vehicleInvData = vehicleInvDoc.data();
+                    const mainInvData = inventoryDoc.data();
+                    const packagingStructure = mainInvData.packagingStructure || {};
+
+                    // 1. Deduct from Vehicle
+                    const layers = vehicleInvData.layers || [];
+                    const layerIndex = item.layerIndex || 0;
+                    const targetLayer = layers.find(l => l.layerIndex === layerIndex);
+
+                    // Allow return if quantity matches exactly or is less
+                    // Note: item.quantity must be deducted.
+                    if (!targetLayer || targetLayer.quantity < item.quantity) {
+                        throw new ValidationError(`Insufficient vehicle stock for ${mainInvData.productName}. Available: ${targetLayer?.quantity || 0}`);
+                    }
+
+                    targetLayer.quantity -= item.quantity;
+
+                    transaction.update(vehicleInvDoc.ref, {
+                        layers: layers,
+                        lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    // 2. Add to Main Inventory
+                    const multiplier = this.calculateMultiplier(packagingStructure, layerIndex);
+                    const totalPiecesToAdd = item.quantity * multiplier;
+
+                    transaction.update(inventoryDoc.ref, {
+                        stock: mainInvData.stock + totalPiecesToAdd,
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    // 3. Log Adjustment
+                    const adjustmentRef = this.db.collection('stock_adjustments').doc();
+                    transaction.set(adjustmentRef, {
+                        inventoryId: item.inventoryId,
+                        productName: mainInvData.productName,
+                        previousStock: mainInvData.stock,
+                        adjustment: totalPiecesToAdd,
+                        newStock: mainInvData.stock + totalPiecesToAdd,
+                        reason: 'return',
+                        transferNumber: transferNumber,
+                        vehicleId: vehicleId,
+                        notes: `Return from ${vehicle.vehicleName}`,
+                        createdAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    finalItems.push({
+                        inventoryId: item.inventoryId,
+                        productName: mainInvData.productName,
+                        unit: item.unit,
+                        quantity: item.quantity,
+                        layerIndex: layerIndex
+                    });
+                }
+
+                // 4. Create Transfer Record
+                const transferRef = this.db.collection(this.collection).doc();
+                transaction.set(transferRef, {
+                    transferNumber,
+                    vehicleId,
+                    vehicleName: vehicle.vehicleName,
+                    fromLocation: vehicle.vehicleName,
+                    toLocation: 'Main Store',
+                    type: 'return',
+                    status: 'returned',
+                    items: finalItems,
+                    issuedBy: userId,
+                    issuedByName: userName,
+                    notes,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            });
+
+            // Invalidate cache
+            await cache.delPattern(`${this.cachePrefix}*`);
+            await cache.delPattern(`vehicle:inventory:${vehicleId}*`);
+
+            return { success: true, transferNumber };
+        } catch (error) {
+            logger.error('Return stock error:', error);
             throw error;
         }
     }
