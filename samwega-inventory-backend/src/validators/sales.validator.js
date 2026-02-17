@@ -322,7 +322,7 @@ const searchSalesSchema = Joi.object({
     minAmount: Joi.number().positive().optional(),
     maxAmount: Joi.number().positive().optional(),
     page: Joi.number().integer().min(1).default(1),
-    limit: Joi.number().integer().min(1).max(100).default(20),
+    limit: Joi.number().integer().min(1).max(2000).default(20),
     sortBy: Joi.string().valid('receiptNumber', 'grandTotal', 'saleDate', 'createdAt').default('createdAt'),
     sortOrder: Joi.string().valid('asc', 'desc').default('desc')
 });
