@@ -276,7 +276,7 @@ class SalesService {
 
                 // Create sale record
                 const saleRef = this.db.collection(this.collection).doc();
-                const saleData = {
+                const saleDoc = {
                     receiptNumber,
                     vehicleId,
                     vehicleName: vehicle.vehicleName,
@@ -297,6 +297,7 @@ class SalesService {
                     customerIdNumber: customerIdNumber || null,
                     customerEmail: customerEmail || null,
                     isEtr: Boolean(isEtr),
+                    bankName: saleData.bankName || null,
                     location: location ? {
                         latitude: location.latitude,
                         longitude: location.longitude,
@@ -314,7 +315,7 @@ class SalesService {
                     updatedAt: admin.firestore.FieldValue.serverTimestamp()
                 };
 
-                transaction.set(saleRef, saleData);
+                transaction.set(saleRef, saleDoc);
 
                 // Update customer purchase stats if customer exists
                 if (customerId) {
