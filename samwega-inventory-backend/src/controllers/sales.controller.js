@@ -90,8 +90,8 @@ const voidSale = async (req, res) => {
  */
 const getStats = async (req, res) => {
     try {
-        const { vehicleId, startDate, endDate, type, isEtr } = req.query;
-        const stats = await salesService.getStats(vehicleId, { startDate, endDate, type, isEtr });
+        const { vehicleId, startDate, endDate, type, isEtr, bankName } = req.query;
+        const stats = await salesService.getStats(vehicleId, { startDate, endDate, type, isEtr, bankName });
         return res.status(200).json(successResponse(stats, 'Sales stats retrieved successfully'));
     } catch (error) {
         logger.error('Get stats controller error:', error);

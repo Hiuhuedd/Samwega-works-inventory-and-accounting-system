@@ -40,9 +40,16 @@ const getLast30Days = () => {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-const StatCard = ({ title, value, subValue }) => (
-    <div className="bg-white p-4 rounded-lg border border-slate-200">
-        <h3 className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-2">{title}</h3>
+const StatCard = ({ title, value, subValue, tag }) => (
+    <div className="bg-white p-4 rounded-lg border border-slate-200 relative overflow-hidden">
+        <div className="flex items-start justify-between mb-2">
+            <h3 className="text-slate-500 text-xs font-medium uppercase tracking-wider">{title}</h3>
+            {tag && (
+                <span className="bg-sky-50 text-sky-600 px-1.5 py-0.5 rounded text-[9px] font-bold border border-sky-100 uppercase tracking-tight">
+                    {tag}
+                </span>
+            )}
+        </div>
         <div className="flex items-baseline justify-between">
             <p className="text-2xl font-semibold text-slate-900">{value}</p>
             {subValue && (
@@ -365,8 +372,9 @@ export default function SalesDashboard() {
                             value={`KSh ${(typeof stats?.paymentMethods?.mpesa === 'object' ? stats.paymentMethods.mpesa.amount : (stats?.paymentMethods?.mpesa || 0)).toLocaleString()}`}
                         />
                         <StatCard
-                            title="Bank Sales"
+                            title={bankFilter ? `${bankFilter} Bank` : "Bank Sales"}
                             value={`KSh ${(typeof stats?.paymentMethods?.bank === 'object' ? stats.paymentMethods.bank.amount : (stats?.paymentMethods?.bank || 0)).toLocaleString()}`}
+                            tag={bankFilter}
                         />
                         <StatCard
                             title="Debt Sales"

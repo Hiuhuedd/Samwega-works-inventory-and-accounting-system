@@ -734,7 +734,7 @@ class SalesService {
      */
     async getStats(vehicleId, options = {}) {
         try {
-            const { startDate, endDate, type = 'daily', useFallback = true, isEtr } = options;
+            const { startDate, endDate, type = 'daily', useFallback = true, isEtr, bankName } = options;
 
             // Normalise isEtr to a boolean or undefined
             let isEtrFilter;
@@ -742,9 +742,9 @@ class SalesService {
             else if (isEtr === 'false' || isEtr === false) isEtrFilter = false;
             // else isEtrFilter remains undefined => no filter
 
-            // When filtering by ETR status, the daily_sales_summary doesn't have that breakdown,
+            // When filtering by ETR status or specific Bank, the daily_sales_summary doesn't have that breakdown,
             // so we must always go straight to the fallback aggregation.
-            const forceFallback = isEtrFilter !== undefined;
+            const forceFallback = isEtrFilter !== undefined || !!bankName;
 
             logger.info(`=== STATS CALCULATION (${type}) ===`);
 
@@ -826,6 +826,11 @@ class SalesService {
                 // Apply ETR filter
                 if (isEtrFilter !== undefined) {
                     salesQuery = salesQuery.where('isEtr', '==', isEtrFilter);
+                }
+
+                // Apply bank filter
+                if (bankName) {
+                    salesQuery = salesQuery.where('bankName', '==', bankName);
                 }
 
                 if (startDate && endDate) {
