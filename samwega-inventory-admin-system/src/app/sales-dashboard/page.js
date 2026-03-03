@@ -9,7 +9,11 @@ import {
     List,
     ChevronDown,
     Receipt,
-    X
+    X,
+    CreditCard,
+    CheckCircle,
+    Clock,
+    AlertCircle
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import api from "../../lib/api";
@@ -76,6 +80,64 @@ const PaymentBadge = ({ method }) => {
     );
 };
 
+const DebtStatusBadge = ({ debt }) => {
+    if (!debt) return null;
+
+    // Use displayStatus from backend or derive it
+    const status = debt.displayStatus || (
+        debt.remainingAmount === 0 ? 'paid' :
+            (debt.paidAmount > 0 ? 'partial' :
+                (debt.status === 'overdue' ? 'overdue' : 'unpaid'))
+    );
+
+    const config = {
+        paid: {
+            bg: "bg-emerald-50",
+            text: "text-emerald-700",
+            border: "border-emerald-100",
+            icon: <CheckCircle size={10} />,
+            label: "Paid"
+        },
+        partial: {
+            bg: "bg-amber-50",
+            text: "text-amber-700",
+            border: "border-amber-100",
+            icon: <Clock size={10} />,
+            label: `Partial: KSh ${fmt(debt.remainingAmount)}`
+        },
+        overdue: {
+            bg: "bg-rose-50",
+            text: "text-rose-700",
+            border: "border-rose-100",
+            icon: <AlertCircle size={10} />,
+            label: "Overdue"
+        },
+        unpaid: {
+            bg: "bg-slate-100",
+            text: "text-slate-600",
+            border: "border-slate-200",
+            icon: <Clock size={10} />,
+            label: "Unpaid"
+        },
+    };
+
+    const style = config[status] || config.unpaid;
+
+    return (
+        <div className="flex flex-col gap-1 mt-1">
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold border ${style.bg} ${style.text} ${style.border} uppercase tracking-tight`}>
+                {style.icon}
+                {style.label}
+            </span>
+            {status === 'paid' && debt.paidPaymentMethod && (
+                <span className="text-[9px] text-slate-400 font-medium px-0.5 italic">
+                    via {debt.paidPaymentMethod}
+                </span>
+            )}
+        </div>
+    );
+};
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export default function SalesDashboard() {
@@ -97,6 +159,9 @@ export default function SalesDashboard() {
     const [endDate, setEndDate] = useState("");
     const [etrFilter, setEtrFilter] = useState("");
     const [bankFilter, setBankFilter] = useState("");
+    const [debtFilter, setDebtFilter] = useState(false);
+    const [debtEnrichment, setDebtEnrichment] = useState({});
+    const [debtSummary, setDebtSummary] = useState(null);
     const [search, setSearch] = useState(""); // searches receipt#, customer, items
 
     // Transactions-mode specific
@@ -106,7 +171,7 @@ export default function SalesDashboard() {
     // ── Fetch ────────────────────────────────────────────────────────────────
 
     useEffect(() => { fetchVehicles(); }, []);
-    useEffect(() => { fetchData(); }, [selectedVehicle, startDate, endDate, etrFilter, bankFilter]);
+    useEffect(() => { fetchData(); }, [selectedVehicle, startDate, endDate, etrFilter, bankFilter, debtFilter]);
 
     const fetchVehicles = async () => {
         try {
@@ -131,9 +196,10 @@ export default function SalesDashboard() {
             if (etrFilter) filters.isEtr = etrFilter;
             if (bankFilter) filters.bankName = bankFilter;
 
-            const [statsData, salesData] = await Promise.all([
+            const [statsData, salesData, debtSumData] = await Promise.all([
                 api.getSalesStats(filters),
-                api.getSales({ ...filters, limit: 200 }),
+                api.getSales({ ...filters, limit: 150 }), // Reduced limit for faster enrichment
+                api.getDebtDashboardSummary(filters)
             ]);
 
             if (statsData.success && statsData.data) {
@@ -142,12 +208,33 @@ export default function SalesDashboard() {
                 setStats({ totalRevenue: 0, totalTransactions: 0, totalItemsSold: 0, paymentMethods: {} });
             }
 
+            if (debtSumData.success) {
+                setDebtSummary(debtSumData.data);
+            }
+
+            let fetchedSales = [];
             if (salesData.success && Array.isArray(salesData.data?.sales)) {
-                setSales(salesData.data.sales);
+                fetchedSales = salesData.data.sales;
             } else if (salesData.success && Array.isArray(salesData.data)) {
-                setSales(salesData.data);
-            } else {
-                setSales([]);
+                fetchedSales = salesData.data;
+            }
+
+            setSales(fetchedSales);
+
+            // Fetch live debt records for enrichment if there are credit/mixed sales
+            const creditSaleIds = fetchedSales
+                .filter(s => s.paymentMethod === 'credit' || s.paymentMethod === 'mixed')
+                .map(s => s.id);
+
+            if (creditSaleIds.length > 0) {
+                try {
+                    const enrichRes = await api.enrichSalesWithDebt(creditSaleIds);
+                    if (enrichRes.success) {
+                        setDebtEnrichment(enrichRes.data);
+                    }
+                } catch (err) {
+                    console.warn("Failed to enrich sales with debt data:", err);
+                }
             }
 
             const userRes = await api.getCurrentUser();
@@ -218,16 +305,27 @@ export default function SalesDashboard() {
 
     // ── Derived: transactions search ──────────────────────────────────────────
     const filteredSales = useMemo(() => {
-        if (!search.trim()) return sales;
+        let result = sales;
+
+        // Apply debt filter sidebar/btn if active
+        if (debtFilter) {
+            result = result.filter(s =>
+                s.paymentMethod === 'credit' ||
+                s.paymentMethod === 'debt' ||
+                (s.paymentMethod === 'mixed' && Array.isArray(s.payments) && s.payments.some(p => p.method === 'credit' || p.method === 'debt'))
+            );
+        }
+
+        if (!search.trim()) return result;
         const q = search.toLowerCase();
-        return sales.filter(
+        return result.filter(
             (s) =>
                 (s.receiptNumber || "").toLowerCase().includes(q) ||
                 (s.customerName || "").toLowerCase().includes(q) ||
                 (s.customer?.name || "").toLowerCase().includes(q) ||
                 (s.items || []).some((i) => (i.productName || "").toLowerCase().includes(q))
         );
-    }, [sales, search]);
+    }, [sales, search, debtFilter]);
 
     // ── P&L Totals ────────────────────────────────────────────────────────────
     const pnlTotals = useMemo(() => {
@@ -247,6 +345,7 @@ export default function SalesDashboard() {
         setEndDate("");
         setEtrFilter("");
         setBankFilter("");
+        setDebtFilter(false);
         setSearch("");
     };
 
@@ -328,6 +427,19 @@ export default function SalesDashboard() {
                                 </select>
                             </div>
 
+                            {/* Debt Toggle Filter */}
+                            <button
+                                onClick={() => setDebtFilter(!debtFilter)}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded border text-sm font-medium transition-colors ${debtFilter
+                                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                                    }`}
+                            >
+                                <CreditCard size={14} className={debtFilter ? "text-amber-600" : "text-slate-400"} />
+                                Debt
+                            </button>
+
+
                             {/* Date range */}
                             <div className="flex items-center gap-1 bg-white border border-slate-200 rounded px-3 py-1.5 text-sm">
                                 <input
@@ -345,7 +457,7 @@ export default function SalesDashboard() {
                                 />
                             </div>
 
-                            {(selectedVehicle || startDate || endDate || etrFilter || bankFilter || search) && (
+                            {(selectedVehicle || startDate || endDate || etrFilter || bankFilter || debtFilter || search) && (
                                 <button
                                     onClick={resetFilters}
                                     className="flex items-center gap-1 text-xs text-rose-500 font-medium hover:text-rose-700 bg-white border border-rose-200 rounded px-2 py-1.5"
@@ -377,8 +489,10 @@ export default function SalesDashboard() {
                             tag={bankFilter}
                         />
                         <StatCard
-                            title="Debt Sales"
-                            value={`KSh ${(typeof stats?.paymentMethods?.credit === 'object' ? stats.paymentMethods.credit.amount : (stats?.paymentMethods?.credit || 0)).toLocaleString()}`}
+                            title="Outstanding Debt"
+                            value={`KSh ${debtSummary?.totalOutstanding?.toLocaleString() || stats?.paymentMethods?.credit?.amount?.toLocaleString() || 0}`}
+                            subValue={debtSummary ? `${debtSummary.unpaidCount + debtSummary.overdueCount} UNPAID RECORDS` : ""}
+                            tag={debtFilter ? "FILTERED" : null}
                         />
                     </div>
 
@@ -511,6 +625,10 @@ export default function SalesDashboard() {
                                                                     <span className="text-[10px] text-sky-600 font-medium uppercase tracking-tight">
                                                                         {sale.bankName}
                                                                     </span>
+                                                                )}
+                                                                {/* Debt Status Enrichment */}
+                                                                {(sale.paymentMethod === 'credit' || sale.paymentMethod === 'mixed') && (
+                                                                    <DebtStatusBadge debt={debtEnrichment[sale.id]} />
                                                                 )}
                                                             </div>
                                                         </td>

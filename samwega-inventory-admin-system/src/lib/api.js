@@ -747,6 +747,20 @@ class APIClient {
         const query = new URLSearchParams(filters).toString();
         return this.request(`/activity-logs${query ? `?${query}` : ''}`);
     }
+
+    // ==================== DEBT ====================
+    async getDebtDashboardSummary(filters = {}) {
+        const query = new URLSearchParams(filters).toString();
+        return this.request(`/debt/dashboard-summary${query ? `?${query}` : ''}`);
+    }
+
+    async enrichSalesWithDebt(saleIds) {
+        return this.request('/debt/enrich-sales', {
+            method: 'POST',
+            body: JSON.stringify({ saleIds }),
+        });
+    }
 }
+
 
 export default new APIClient();

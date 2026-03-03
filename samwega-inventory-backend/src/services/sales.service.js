@@ -6,6 +6,7 @@ const { NotFoundError, ValidationError, UnauthorizedError } = require('../utils/
 const { serializeDoc, serializeDocs } = require('../utils/serializer');
 const vehicleService = require('./vehicle.service');
 const inventoryService = require('./inventory.service');
+const debtService = require('./debt.service');
 
 class SalesService {
     constructor() {
@@ -844,47 +845,97 @@ class SalesService {
 
                 const salesSnapshot = await salesQuery.get();
 
-                // Reset stats to ensure we don't double count or mix with summary data
-                stats.totalRevenue = 0;
-                stats.totalTransactions = 0;
-                stats.paymentMethods = {
-                    cash: { amount: 0, count: 0 },
-                    mpesa: { amount: 0, count: 0 },
-                    bank: { amount: 0, count: 0 },
-                    credit: { amount: 0, count: 0 },
-                    mixed: { amount: 0, count: 0 }
-                };
-
                 salesSnapshot.forEach(doc => {
                     const sale = doc.data();
-                    const amount = Number(sale.grandTotal || 0);
-                    if (amount === 0) return;
-
-                    stats.totalRevenue += amount;
-                    stats.totalTransactions += 1;
+                    const grandTotal = Number(sale.grandTotal || 0);
+                    if (grandTotal === 0) return;
 
                     const mainMethod = String(sale.paymentMethod || 'cash').toLowerCase();
 
-                    if (mainMethod === 'mixed' && Array.isArray(sale.payments) && sale.payments.length > 0) {
-                        sale.payments.forEach(p => {
-                            const pMethod = String(p.method || '').toLowerCase();
-                            const pAmount = Number(p.amount || 0);
+                    if (bankName) {
+                        // Special handling for Bank filter: only count the portion belonging to this bank
+                        let bankPortion = 0;
+                        if (mainMethod === 'mixed' && Array.isArray(sale.payments)) {
+                            sale.payments.forEach(p => {
+                                if ((String(p.method || '').toLowerCase().includes('bank')) && p.bankName === bankName) {
+                                    bankPortion += Number(p.amount || 0);
+                                }
+                            });
+                        } else if (mainMethod.includes('bank') && sale.bankName === bankName) {
+                            bankPortion = grandTotal;
+                        }
 
-                            if (pMethod === 'cash') { stats.paymentMethods.cash.amount += pAmount; stats.paymentMethods.cash.count += 1; }
-                            else if (pMethod.includes('mpesa') || pMethod.includes('mobile')) { stats.paymentMethods.mpesa.amount += pAmount; stats.paymentMethods.mpesa.count += 1; }
-                            else if (pMethod.includes('bank') || pMethod.includes('card') || pMethod.includes('cheque')) { stats.paymentMethods.bank.amount += pAmount; stats.paymentMethods.bank.count += 1; }
-                            else if (pMethod === 'credit' || pMethod === 'debt') { stats.paymentMethods.credit.amount += pAmount; stats.paymentMethods.credit.count += 1; }
-                            else { stats.paymentMethods.cash.amount += pAmount; stats.paymentMethods.cash.count += 1; } // Default sub-payment to cash
-                        });
+                        if (bankPortion > 0) {
+                            stats.totalRevenue += bankPortion;
+                            stats.totalTransactions += 1;
+                            stats.paymentMethods.bank.amount += bankPortion;
+                            stats.paymentMethods.bank.count += 1;
+                        }
                     } else {
-                        // Single payment method or mixed without payment details
-                        if (mainMethod === 'cash') { stats.paymentMethods.cash.amount += amount; stats.paymentMethods.cash.count += 1; }
-                        else if (mainMethod.includes('mpesa') || mainMethod.includes('mobile')) { stats.paymentMethods.mpesa.amount += amount; stats.paymentMethods.mpesa.count += 1; }
-                        else if (mainMethod.includes('bank') || mainMethod.includes('card') || mainMethod.includes('cheque')) { stats.paymentMethods.bank.amount += amount; stats.paymentMethods.bank.count += 1; }
-                        else if (mainMethod === 'credit' || mainMethod === 'debt') { stats.paymentMethods.credit.amount += amount; stats.paymentMethods.credit.count += 1; }
-                        else { stats.paymentMethods.cash.amount += amount; stats.paymentMethods.cash.count += 1; } // Default to cash for everything else
+                        // Regular aggregation
+                        stats.totalRevenue += grandTotal;
+                        stats.totalTransactions += 1;
+
+                        if (mainMethod === 'mixed' && Array.isArray(sale.payments) && sale.payments.length > 0) {
+                            sale.payments.forEach(p => {
+                                const pMethod = String(p.method || '').toLowerCase();
+                                const pAmount = Number(p.amount || 0);
+
+                                if (pMethod === 'cash') { stats.paymentMethods.cash.amount += pAmount; stats.paymentMethods.cash.count += 1; }
+                                else if (pMethod.includes('mpesa') || pMethod.includes('mobile')) { stats.paymentMethods.mpesa.amount += pAmount; stats.paymentMethods.mpesa.count += 1; }
+                                else if (pMethod.includes('bank') || pMethod.includes('card') || pMethod.includes('cheque')) { stats.paymentMethods.bank.amount += pAmount; stats.paymentMethods.bank.count += 1; }
+                                else if (pMethod === 'credit' || pMethod === 'debt') { stats.paymentMethods.credit.amount += pAmount; stats.paymentMethods.credit.count += 1; }
+                                else { stats.paymentMethods.cash.amount += pAmount; stats.paymentMethods.cash.count += 1; }
+                            });
+                        } else {
+                            if (mainMethod === 'cash') { stats.paymentMethods.cash.amount += grandTotal; stats.paymentMethods.cash.count += 1; }
+                            else if (mainMethod.includes('mpesa') || mainMethod.includes('mobile')) { stats.paymentMethods.mpesa.amount += grandTotal; stats.paymentMethods.mpesa.count += 1; }
+                            else if (mainMethod.includes('bank') || mainMethod.includes('card') || mainMethod.includes('cheque')) { stats.paymentMethods.bank.amount += grandTotal; stats.paymentMethods.bank.count += 1; }
+                            else if (mainMethod === 'credit' || mainMethod === 'debt') { stats.paymentMethods.credit.amount += grandTotal; stats.paymentMethods.credit.count += 1; }
+                            else { stats.paymentMethods.cash.amount += grandTotal; stats.paymentMethods.cash.count += 1; }
+                        }
                     }
                 });
+            }
+
+            // 3. ENRICH WITH LIVE DEBT STATS
+            // Override 'credit' bucket with true outstanding amount from debt system
+            try {
+                // Get vehicle plate for accurate filtering if vehicleId is provided
+                let vehiclePlate;
+                if (vehicleId) {
+                    try {
+                        const vehicle = await vehicleService.getVehicleById(vehicleId);
+                        vehiclePlate = vehicle?.plateNumber || vehicle?.vehiclePlate;
+                    } catch (_) {
+                        // fallback to vehicleId if plate lookup fails
+                        vehiclePlate = vehicleId;
+                    }
+                }
+
+                const debtSummary = await debtService.getDashboardSummary({
+                    vehiclePlate,
+                    startDate,
+                    endDate
+                });
+
+                // Update the credit bucket with LIVE data
+                // We keep the count from inventory sales query, but Use amount from debt API
+                stats.paymentMethods.credit.amount = debtSummary.totalOutstanding;
+
+                // PAYMENT TRANSFER: Add debt payments to their respective buckets
+                if (debtSummary.collections) {
+                    const coll = debtSummary.collections;
+                    stats.paymentMethods.cash.amount += (coll.cash || 0);
+                    stats.paymentMethods.mpesa.amount += (coll.mpesa || 0);
+                    stats.paymentMethods.bank.amount += (coll.bank || 0);
+
+                    logger.info(`Stats updated with Debt Collections: Cash(+${coll.cash || 0}), Mpesa(+${coll.mpesa || 0}), Bank(+${coll.bank || 0})`);
+                }
+
+                logger.info(`Stats enriched with Live Debt. Original Credit Sale Total overridden with Outstanding: ${debtSummary.totalOutstanding}`);
+            } catch (debtStatsError) {
+                logger.warn(`Failed to enrich stats with live debt: ${debtStatsError.message}`);
             }
 
             return stats;
@@ -1005,14 +1056,6 @@ class SalesService {
 
             for (const id of saleIds) {
                 const ref = this.db.collection(this.collection).doc(id);
-                // We could verify existence, but for batch performance we might skip reading if we trust the IDs
-                // However, to be safe and maybe restore inventory (if that's desired), we should read.
-                // The user just said "delete", and usually "deletion" in this context (adjusting revenue) 
-                // might NOT want to mess with inventory if it's just financial adjustment, 
-                // BUT "Delete Sales" usually implies reversing the transaction.
-                // Given "KK-Calc" is likely for fixing "inflated revenue" (stuff that shouldn't exist), 
-                // simply deleting the record is the request. 
-                // I will perform a hard delete for now as per "delete".
                 batch.delete(ref);
                 deletedIds.push(id);
             }
@@ -1032,6 +1075,42 @@ class SalesService {
             throw error;
         }
     }
+
+    /**
+     * Link a sale record to a debt record.
+     * @param {string} saleId
+     * @param {object} debtInfo { debtId, debtCode }
+     * @returns {Promise<Object>}
+     */
+    async linkDebt(saleId, { debtId, debtCode }) {
+        try {
+            logger.info(`Linking sale ${saleId} to debt ${debtId} (${debtCode})`);
+
+            const saleRef = this.db.collection(this.collection).doc(saleId);
+            const saleDoc = await saleRef.get();
+
+            if (!saleDoc.exists) {
+                throw new Error('Sale not found');
+            }
+
+            const updateData = {
+                debtId,
+                debtCode,
+                updatedAt: new Date()
+            };
+
+            await saleRef.update(updateData);
+
+            // Invalidate cache for this sale
+            await cache.delPattern(`${this.cachePrefix}*`);
+
+            return { success: true, saleId, debtId, debtCode };
+        } catch (error) {
+            logger.error(`Error linking sale ${saleId} to debt:`, error);
+            throw error;
+        }
+    }
 }
+
 
 module.exports = new SalesService();

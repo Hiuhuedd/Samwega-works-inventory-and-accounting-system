@@ -85,9 +85,6 @@ const voidSale = async (req, res) => {
 /**
  * Get sales stats
  */
-/**
- * Get sales stats
- */
 const getStats = async (req, res) => {
     try {
         const { vehicleId, startDate, endDate, type, isEtr, bankName } = req.query;
@@ -95,6 +92,27 @@ const getStats = async (req, res) => {
         return res.status(200).json(successResponse(stats, 'Sales stats retrieved successfully'));
     } catch (error) {
         logger.error('Get stats controller error:', error);
+        return res.status(error.statusCode || 500).json(errorResponse(error.message, error.details));
+    }
+};
+
+/**
+ * Link a sale to a debt record.
+ * @route PATCH /api/v1/sales/:id/debt-link
+ */
+const linkDebt = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { debtId, debtCode } = req.body;
+
+        if (!debtId || !debtCode) {
+            return res.status(400).json(errorResponse('debtId and debtCode are required'));
+        }
+
+        const result = await salesService.linkDebt(id, { debtId, debtCode });
+        return res.status(200).json(successResponse(result, 'Sale linked to debt successfully'));
+    } catch (error) {
+        logger.error('Link debt controller error:', error);
         return res.status(error.statusCode || 500).json(errorResponse(error.message, error.details));
     }
 };
@@ -161,5 +179,7 @@ module.exports = {
     getStats,
     findCombination,
     deleteBatch,
-    deleteSale
+    deleteSale,
+    linkDebt
 };
+

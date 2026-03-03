@@ -161,4 +161,17 @@ router.delete(
     salesController.deleteSale
 );
 
+/**
+ * @route   PATCH /api/v1/sales/:id/debt-link
+ * @desc    Link sale to debt record
+ * @access  Verified users
+ */
+router.patch(
+    '/:id/debt-link',
+    verifyToken,
+    requireVerified,
+    salesController.linkDebt
+);
+
 module.exports = router;
+
