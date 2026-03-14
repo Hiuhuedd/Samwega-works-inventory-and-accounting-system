@@ -154,18 +154,21 @@ export default function SalesTeamPage() {
         }
     };
 
-    const assignVehicle = async (userId, vehicleId) => {
-        setUpdating(userId);
+    const toggleAccess = async (user) => {
+        const action = user.isDisabled ? "enable" : "disable";
+        if (!confirm(`Are you sure you want to ${action} this user?`)) return;
+
+        setUpdating(user.id);
         try {
-            const res = await api.assignVehicle(userId, vehicleId || null);
+            const res = await api.updateUser(user.id, { isDisabled: !user.isDisabled });
             if (res.success) {
                 await fetchData();
             } else {
-                alert(res.error || 'Failed to assign vehicle');
+                alert(`Failed to ${action} user`);
             }
         } catch (err) {
-            console.error('Error assigning vehicle:', err);
-            alert('Error assigning vehicle');
+            console.error(`Error during ${action}:`, err);
+            alert(`Error during ${action}: ` + (err.message || 'Unknown error'));
         } finally {
             setUpdating(null);
         }
@@ -465,7 +468,8 @@ export default function SalesTeamPage() {
                                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700">User</th>
                                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700">Role</th>
                                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700">Contact</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700">Status</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700">Verification</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700">Access</th>
                                     {activeTab === 'sales' && (
                                         <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700">Assigned Vehicle</th>
                                     )}
@@ -530,6 +534,28 @@ export default function SalesTeamPage() {
                                                         <>
                                                             <XCircle size={14} />
                                                             Pending
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <button
+                                                    onClick={() => toggleAccess(user)}
+                                                    disabled={isUpdating || isCurrentUser}
+                                                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${user.isDisabled
+                                                        ? 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+                                                        : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                        } ${(isUpdating || isCurrentUser) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {user.isDisabled ? (
+                                                        <>
+                                                            <Lock size={14} />
+                                                            Disabled
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Shield size={14} />
+                                                            Active
                                                         </>
                                                     )}
                                                 </button>
