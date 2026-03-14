@@ -109,7 +109,10 @@ const updateUserSchema = Joi.object({
         .optional()
         .messages({
             'string.min': 'Password must be at least 6 characters long'
-        })
+        }),
+
+    isDisabled: Joi.boolean()
+        .optional()
 }).min(1); // At least one field must be provided
 
 /**
