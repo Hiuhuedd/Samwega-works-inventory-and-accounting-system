@@ -383,318 +383,318 @@ export default function BulkAddItemPage() {
                     </div>
                   </div>
 
+
+
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-slate-700">Status</label>
+                    <select
+                      value={invoiceForm.status}
+                      onChange={(e) => setInvoiceForm(prev => ({ ...prev, status: e.target.value }))}
+                      className="w-full h-10 px-3 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-400 text-sm bg-white"
+                    >
+                      <option value="unpaid">Unpaid</option>
+                      <option value="paid">Paid</option>
+                      <option value="partial">Partial</option>
+                    </select>
+                  </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-700">Status</label>
-                  <select
-                    value={invoiceForm.status}
-                    onChange={(e) => setInvoiceForm(prev => ({ ...prev, status: e.target.value }))}
-                    className="w-full h-10 px-3 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-400 text-sm bg-white"
+                <div className="mt-8 flex justify-end">
+                  <button
+                    onClick={handleCreateInvoice}
+                    disabled={loading}
+                    className="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors flex items-center gap-2"
                   >
-                    <option value="unpaid">Unpaid</option>
-                    <option value="paid">Paid</option>
-                    <option value="partial">Partial</option>
-                  </select>
+                    {loading ? 'Creating...' : <>Proceed to Add Items <ChevronRight size={16} /></>}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )
+      }
+
+      {/* STEP 2: ADD ITEMS */}
+      {
+        step === 2 && (
+          <div className="space-y-6">
+
+            {/* Context Header */}
+            <div className="bg-white p-4 rounded-lg border border-slate-200 flex flex-wrap items-center justify-between gap-4 text-sm">
+              <div className="flex items-center gap-6">
+                <div>
+                  <span className="text-slate-500 block text-xs uppercase tracking-wider mb-0.5">Supplier</span>
+                  <span className="font-semibold text-slate-900">{createdInvoice?.supplierName}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-xs uppercase tracking-wider mb-0.5">Invoice #</span>
+                  <span className="font-semibold text-slate-900">{createdInvoice?.invoiceNumber}</span>
+                </div>
+                <div hidden>
+                  <span className="text-slate-500 block text-xs uppercase tracking-wider mb-0.5">Amount</span>
+                  <span className="font-semibold text-slate-900">KES {createdInvoice?.totalAmount?.toLocaleString()}</span>
                 </div>
               </div>
 
-            <div className="mt-8 flex justify-end">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-md border border-slate-100">
+                  <Package size={16} className="text-slate-400" />
+                  <select
+                    value={formData.warehouseId}
+                    onChange={(e) => setFormData(prev => ({ ...prev, warehouseId: e.target.value }))}
+                    className="bg-transparent border-none text-sm font-medium text-slate-700 outline-none cursor-pointer w-40"
+                  >
+                    <option value="">Select Warehouse</option>
+                    {warehouses.map(w => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={async () => {
+                    const name = prompt("Enter new warehouse name:");
+                    if (name) {
+                      try {
+                        // Simple implementation: 'Main' as default location or adapt per backend.
+                        // Adjust 'Main' if backend requires specific location string.
+                        const res = await api.createWarehouse({ name, location: 'Main' });
+                        if (res.success || res.data) {
+                          const wRes = await api.getWarehouses();
+                          const wData = wRes.success && wRes.data
+                            ? (Array.isArray(wRes.data) ? wRes.data : (wRes.data.warehouses || []))
+                            : [];
+                          setWarehouses(wData);
+                          const newWah = wData.find(w => w.name === name);
+                          if (newWah) setFormData(prev => ({ ...prev, warehouseId: newWah.id }));
+                        }
+                      } catch (e) {
+                        alert("Failed to create warehouse");
+                      }
+                    }
+                  }}
+                  className="p-2 hover:bg-slate-100 rounded-md text-slate-600 border border-slate-200 transaction-colors"
+                  title="Add New Warehouse"
+                >
+                  <Plus size={16} />
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!formData.warehouseId) return alert("Select a warehouse to edit");
+                    const current = warehouses.find(w => w.id === formData.warehouseId);
+                    const newName = prompt("Rename warehouse:", current?.name);
+                    if (newName && newName !== current?.name) {
+                      alert("Edit functionality requires backend implementation. (For now, create new)");
+                    }
+                  }}
+                  className="p-2 hover:bg-slate-100 rounded-md text-slate-600 border border-slate-200 transaction-colors"
+                  title="Edit Selected Warehouse"
+                >
+                  <FileText size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Add Item Bar */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4 mb-4 relative z-20">
+              <div className="relative max-w-md mr-auto">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && searchQuery.trim()) {
+                      addItemRow();
+                    }
+                  }}
+                  placeholder="Search item to add..."
+                  className="w-full pl-11 pr-20 py-2.5 rounded-lg border border-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-400 text-sm"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => addItemRow()}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-slate-900 text-white px-3 py-1 rounded text-xs font-medium"
+                  >
+                    Add
+                  </button>
+                )}
+
+                {/* Search Results */}
+                {showResults && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden z-30">
+                    {searchResults.map(item => (
+                      <button
+                        key={item.id}
+                        onClick={() => addItemRow(item)}
+                        className="w-full text-left px-4 py-3 hover:bg-slate-50 flex justify-between items-center group"
+                      >
+                        <div>
+                          <div className="font-medium text-slate-800 text-sm">{item.productName}</div>
+                          <div className="text-xs text-slate-500">{item.category}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-medium text-slate-900">KES {item.sellingPrice}</div>
+                        </div>
+                      </button>
+                    ))}
+                    {searchResults.length === 0 && (
+                      <div className="p-3 text-xs text-slate-400 text-center">No results. Press enter to add new.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Main Items Table */}
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+              <div className="overflow-x-auto min-h-[300px]">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3 w-[25%] pl-6">Product</th>
+                      <th className="px-4 py-3 w-[15%]">Category</th>
+                      <th className="px-4 py-3 w-[10%]">Qty</th>
+                      <th className="px-4 py-3 w-[10%]">Unit</th>
+                      <th className="px-4 py-3 w-[15%]">Buying</th>
+                      <th className="px-4 py-3 w-[15%]">Selling</th>
+                      <th className="px-4 py-3 w-[10%] text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {formData.items.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-2 pl-6">
+                          <input
+                            type="text"
+                            value={item.productName}
+                            onChange={(e) => updateItemRow(item.id, 'productName', e.target.value)}
+                            className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm font-medium placeholder-slate-400"
+                            placeholder="Item Name"
+                            readOnly={item.isExisting}
+                          />
+                          {item.isExisting && <span className="text-[10px] text-emerald-600 flex items-center gap-1 mt-0.5"><CheckCircle size={8} /> Existing</span>}
+                        </td>
+                        <td className="px-4 py-2">
+                          <select
+                            value={item.category}
+                            onChange={(e) => updateItemRow(item.id, 'category', e.target.value)}
+                            className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-slate-600"
+                            disabled={item.isExisting}
+                          >
+                            <option value="misc">Misc</option>
+
+                            <option value="Building Materials">Building</option>
+                            <option value="Hardware">Hardware</option>
+                            <option value="Electrical">Electrical</option>
+                            <option value="Plumbing">Plumbing</option>
+                            <option value="Farming">Farming</option>
+                            <option value="Fasteners">Fasteners</option>
+                            <option value="Paint">Paint</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => updateItemRow(item.id, 'quantity', e.target.value)}
+                            className="w-full bg-transparent border-b border-transparent focus:border-sky-500 focus:ring-0 p-0 text-sm text-center"
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="text"
+                            value={item.unit}
+                            onChange={(e) => updateItemRow(item.id, 'unit', e.target.value)}
+                            className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm"
+                            list="unit-suggestions"
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="number"
+                            value={item.buyingPrice}
+                            onChange={(e) => updateItemRow(item.id, 'buyingPrice', e.target.value)}
+                            className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm"
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="number"
+                            value={item.sellingPrice}
+                            onChange={(e) => updateItemRow(item.id, 'sellingPrice', e.target.value)}
+                            className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm font-medium text-slate-900"
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          <button onClick={() => removeRow(item.id)} className="text-slate-400 hover:text-rose-500 transition-colors">
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {formData.items.length > 0 && (
+                      <tr className="bg-slate-50 border-t-2 border-slate-200 font-bold">
+                        <td colSpan={4} className="px-4 py-3 text-right text-slate-500 uppercase tracking-wider text-xs">Totals:</td>
+                        <td className="px-4 py-3 text-sm text-slate-900">
+                          KES {formData.items.reduce((sum, item) => sum + (parseFloat(item.buyingPrice || 0) * parseInt(item.quantity || 0)), 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-900">
+                          KES {formData.items.reduce((sum, item) => sum + (parseFloat(item.sellingPrice || 0) * parseInt(item.quantity || 0)), 0).toLocaleString()}
+                        </td>
+                        <td></td>
+                      </tr>
+                    )}
+                    {formData.items.length === 0 && (
+                      <tr className="border-b-0">
+                        <td colSpan={7} className="px-6 py-12 text-center">
+                          <Package size={40} className="mx-auto mb-3 text-slate-200" />
+                          <p className="text-slate-400 text-sm">No items added yet.</p>
+                          <p className="text-slate-300 text-xs">Use the search bar below to begin.</p>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4">
               <button
-                onClick={handleCreateInvoice}
-                disabled={loading}
-                className="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors flex items-center gap-2"
+                onClick={() => {
+                  if (confirm('Cancel all items?')) {
+                    setStep(1);
+                    setFormData(prev => ({ ...prev, items: [] }));
+                    setCreatedInvoice(null);
+                  }
+                }}
+                className="px-6 py-2.5 text-slate-500 hover:bg-slate-100 rounded-lg text-sm font-medium transition-colors"
               >
-                {loading ? 'Creating...' : <>Proceed to Add Items <ChevronRight size={16} /></>}
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveItems}
+                disabled={loading}
+                className="bg-emerald-600 text-white px-8 py-2.5 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 shadow-sm shadow-emerald-200 transition-all"
+              >
+                {loading ? 'Saving...' : <><Save size={16} className="inline mr-2" /> Save Receipt</>}
               </button>
             </div>
-          </>
-            )}
-        </div>
-        </div>
-  )
-}
-
-{/* STEP 2: ADD ITEMS */ }
-{
-  step === 2 && (
-    <div className="space-y-6">
-
-      {/* Context Header */}
-      <div className="bg-white p-4 rounded-lg border border-slate-200 flex flex-wrap items-center justify-between gap-4 text-sm">
-        <div className="flex items-center gap-6">
-          <div>
-            <span className="text-slate-500 block text-xs uppercase tracking-wider mb-0.5">Supplier</span>
-            <span className="font-semibold text-slate-900">{createdInvoice?.supplierName}</span>
           </div>
-          <div>
-            <span className="text-slate-500 block text-xs uppercase tracking-wider mb-0.5">Invoice #</span>
-            <span className="font-semibold text-slate-900">{createdInvoice?.invoiceNumber}</span>
-          </div>
-          <div hidden>
-            <span className="text-slate-500 block text-xs uppercase tracking-wider mb-0.5">Amount</span>
-            <span className="font-semibold text-slate-900">KES {createdInvoice?.totalAmount?.toLocaleString()}</span>
-          </div>
-        </div>
+        )
+      }
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-md border border-slate-100">
-            <Package size={16} className="text-slate-400" />
-            <select
-              value={formData.warehouseId}
-              onChange={(e) => setFormData(prev => ({ ...prev, warehouseId: e.target.value }))}
-              className="bg-transparent border-none text-sm font-medium text-slate-700 outline-none cursor-pointer w-40"
-            >
-              <option value="">Select Warehouse</option>
-              {warehouses.map(w => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
-          </div>
-          <button
-            onClick={async () => {
-              const name = prompt("Enter new warehouse name:");
-              if (name) {
-                try {
-                  // Simple implementation: 'Main' as default location or adapt per backend.
-                  // Adjust 'Main' if backend requires specific location string.
-                  const res = await api.createWarehouse({ name, location: 'Main' });
-                  if (res.success || res.data) {
-                    const wRes = await api.getWarehouses();
-                    const wData = wRes.success && wRes.data
-                      ? (Array.isArray(wRes.data) ? wRes.data : (wRes.data.warehouses || []))
-                      : [];
-                    setWarehouses(wData);
-                    const newWah = wData.find(w => w.name === name);
-                    if (newWah) setFormData(prev => ({ ...prev, warehouseId: newWah.id }));
-                  }
-                } catch (e) {
-                  alert("Failed to create warehouse");
-                }
-              }
-            }}
-            className="p-2 hover:bg-slate-100 rounded-md text-slate-600 border border-slate-200 transaction-colors"
-            title="Add New Warehouse"
-          >
-            <Plus size={16} />
-          </button>
-          <button
-            onClick={async () => {
-              if (!formData.warehouseId) return alert("Select a warehouse to edit");
-              const current = warehouses.find(w => w.id === formData.warehouseId);
-              const newName = prompt("Rename warehouse:", current?.name);
-              if (newName && newName !== current?.name) {
-                alert("Edit functionality requires backend implementation. (For now, create new)");
-              }
-            }}
-            className="p-2 hover:bg-slate-100 rounded-md text-slate-600 border border-slate-200 transaction-colors"
-            title="Edit Selected Warehouse"
-          >
-            <FileText size={16} />
-          </button>
-        </div>
-      </div>
-
-      {/* Add Item Bar */}
-      <div className="bg-white border border-slate-200 rounded-lg p-4 mb-4 relative z-20">
-        <div className="relative max-w-md mr-auto">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => handleSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && searchQuery.trim()) {
-                addItemRow();
-              }
-            }}
-            placeholder="Search item to add..."
-            className="w-full pl-11 pr-20 py-2.5 rounded-lg border border-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-400 text-sm"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => addItemRow()}
-              className="absolute right-2 top-1/2 -translate-y-1/2 bg-slate-900 text-white px-3 py-1 rounded text-xs font-medium"
-            >
-              Add
-            </button>
-          )}
-
-          {/* Search Results */}
-          {showResults && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden z-30">
-              {searchResults.map(item => (
-                <button
-                  key={item.id}
-                  onClick={() => addItemRow(item)}
-                  className="w-full text-left px-4 py-3 hover:bg-slate-50 flex justify-between items-center group"
-                >
-                  <div>
-                    <div className="font-medium text-slate-800 text-sm">{item.productName}</div>
-                    <div className="text-xs text-slate-500">{item.category}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-medium text-slate-900">KES {item.sellingPrice}</div>
-                  </div>
-                </button>
-              ))}
-              {searchResults.length === 0 && (
-                <div className="p-3 text-xs text-slate-400 text-center">No results. Press enter to add new.</div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Main Items Table */}
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="overflow-x-auto min-h-[300px]">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
-              <tr>
-                <th className="px-4 py-3 w-[25%] pl-6">Product</th>
-                <th className="px-4 py-3 w-[15%]">Category</th>
-                <th className="px-4 py-3 w-[10%]">Qty</th>
-                <th className="px-4 py-3 w-[10%]">Unit</th>
-                <th className="px-4 py-3 w-[15%]">Buying</th>
-                <th className="px-4 py-3 w-[15%]">Selling</th>
-                <th className="px-4 py-3 w-[10%] text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {formData.items.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-2 pl-6">
-                    <input
-                      type="text"
-                      value={item.productName}
-                      onChange={(e) => updateItemRow(item.id, 'productName', e.target.value)}
-                      className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm font-medium placeholder-slate-400"
-                      placeholder="Item Name"
-                      readOnly={item.isExisting}
-                    />
-                    {item.isExisting && <span className="text-[10px] text-emerald-600 flex items-center gap-1 mt-0.5"><CheckCircle size={8} /> Existing</span>}
-                  </td>
-                  <td className="px-4 py-2">
-                    <select
-                      value={item.category}
-                      onChange={(e) => updateItemRow(item.id, 'category', e.target.value)}
-                      className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm text-slate-600"
-                      disabled={item.isExisting}
-                    >
-                      <option value="misc">Misc</option>
-
-                      <option value="Building Materials">Building</option>
-                      <option value="Hardware">Hardware</option>
-                      <option value="Electrical">Electrical</option>
-                      <option value="Plumbing">Plumbing</option>
-                      <option value="Farming">Farming</option>
-                      <option value="Fasteners">Fasteners</option>
-                      <option value="Paint">Paint</option>
-                    </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="number"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(e) => updateItemRow(item.id, 'quantity', e.target.value)}
-                      className="w-full bg-transparent border-b border-transparent focus:border-sky-500 focus:ring-0 p-0 text-sm text-center"
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="text"
-                      value={item.unit}
-                      onChange={(e) => updateItemRow(item.id, 'unit', e.target.value)}
-                      className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm"
-                      list="unit-suggestions"
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="number"
-                      value={item.buyingPrice}
-                      onChange={(e) => updateItemRow(item.id, 'buyingPrice', e.target.value)}
-                      className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm"
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="number"
-                      value={item.sellingPrice}
-                      onChange={(e) => updateItemRow(item.id, 'sellingPrice', e.target.value)}
-                      className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm font-medium text-slate-900"
-                    />
-                  </td>
-                  <td className="px-4 py-2 text-center">
-                    <button onClick={() => removeRow(item.id)} className="text-slate-400 hover:text-rose-500 transition-colors">
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-
-              {formData.items.length > 0 && (
-                <tr className="bg-slate-50 border-t-2 border-slate-200 font-bold">
-                  <td colSpan={4} className="px-4 py-3 text-right text-slate-500 uppercase tracking-wider text-xs">Totals:</td>
-                  <td className="px-4 py-3 text-sm text-slate-900">
-                    KES {formData.items.reduce((sum, item) => sum + (parseFloat(item.buyingPrice || 0) * parseInt(item.quantity || 0)), 0).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-900">
-                    KES {formData.items.reduce((sum, item) => sum + (parseFloat(item.sellingPrice || 0) * parseInt(item.quantity || 0)), 0).toLocaleString()}
-                  </td>
-                  <td></td>
-                </tr>
-              )}
-              {formData.items.length === 0 && (
-                <tr className="border-b-0">
-                  <td colSpan={7} className="px-6 py-12 text-center">
-                    <Package size={40} className="mx-auto mb-3 text-slate-200" />
-                    <p className="text-slate-400 text-sm">No items added yet.</p>
-                    <p className="text-slate-300 text-xs">Use the search bar below to begin.</p>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="flex justify-end gap-3 pt-4">
-        <button
-          onClick={() => {
-            if (confirm('Cancel all items?')) {
-              setStep(1);
-              setFormData(prev => ({ ...prev, items: [] }));
-              setCreatedInvoice(null);
-            }
-          }}
-          className="px-6 py-2.5 text-slate-500 hover:bg-slate-100 rounded-lg text-sm font-medium transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSaveItems}
-          disabled={loading}
-          className="bg-emerald-600 text-white px-8 py-2.5 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 shadow-sm shadow-emerald-200 transition-all"
-        >
-          {loading ? 'Saving...' : <><Save size={16} className="inline mr-2" /> Save Receipt</>}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-{/* Datalist for Units */ }
-<datalist id="unit-suggestions">
-  <option value="PCS" />
-  <option value="KG" />
-  <option value="L" />
-  <option value="Box" />
-  <option value="Set" />
-  <option value="Roll" />
-</datalist>
+      {/* Datalist for Units */}
+      <datalist id="unit-suggestions">
+        <option value="PCS" />
+        <option value="KG" />
+        <option value="L" />
+        <option value="Box" />
+        <option value="Set" />
+        <option value="Roll" />
+      </datalist>
 
     </div >
   );
