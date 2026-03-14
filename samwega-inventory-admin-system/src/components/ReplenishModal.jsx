@@ -56,12 +56,7 @@ export default function ReplenishModal({ isOpen, onClose, item, onSuccess }) {
                 }))
                 : [];
 
-            // Filter to show invoices with remaining amount
-            const availableInvoices = invoicesWithSuppliers.filter(
-                (inv) => inv.remainingAmount > 0.01
-            );
-
-            setInvoices(availableInvoices);
+            setInvoices(invoicesWithSuppliers);
         } catch (err) {
             console.error("Failed to fetch invoices:", err);
         } finally {
@@ -180,7 +175,7 @@ export default function ReplenishModal({ isOpen, onClose, item, onSuccess }) {
                             </div>
                         ) : invoices.length === 0 ? (
                             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
-                                No invoices with remaining balance. Create a new invoice first.
+                                No invoices found. Create a new invoice first.
                             </div>
                         ) : (
                             <select
@@ -192,7 +187,7 @@ export default function ReplenishModal({ isOpen, onClose, item, onSuccess }) {
                                 <option value="">-- Select Invoice --</option>
                                 {invoices.map((inv) => (
                                     <option key={inv.id} value={inv.id}>
-                                        {inv.invoiceNumber} - {inv.supplierName} (Rem: KES {inv.remainingAmount?.toLocaleString()})
+                                        {inv.invoiceNumber} - {inv.supplierName} (Used: KES {inv.itemsTotal?.toLocaleString()})
                                     </option>
                                 ))}
                             </select>
@@ -202,12 +197,9 @@ export default function ReplenishModal({ isOpen, onClose, item, onSuccess }) {
                     {/* Selected Invoice Info */}
                     {selectedInvoice && (
                         <div className="bg-blue-50 border border-blue-100 rounded-lg p-2 text-sm">
-                            <div className="text-blue-600 grid grid-cols-3 gap-2 text-xs">
-                                <span>Total: KES {selectedInvoice.totalAmount?.toLocaleString()}</span>
-                                <span>Used: KES {selectedInvoice.itemsTotal?.toLocaleString()}</span>
-                                <span className="text-green-600 font-medium">
-                                    Available: KES {selectedInvoice.remainingAmount?.toLocaleString()}
-                                </span>
+                            <div className="text-blue-600 grid grid-cols-2 gap-2 text-xs">
+                                <span>Invoice Total: KES {selectedInvoice.totalAmount?.toLocaleString()}</span>
+                                <span className="text-green-600 font-medium">Items Total: KES {selectedInvoice.itemsTotal?.toLocaleString()}</span>
                             </div>
                         </div>
                     )}

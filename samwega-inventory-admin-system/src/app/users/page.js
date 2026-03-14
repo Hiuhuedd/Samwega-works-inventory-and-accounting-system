@@ -40,6 +40,19 @@ export default function UsersPage() {
         }
     };
 
+    const handleToggleStatus = async (user) => {
+        const action = user.isDisabled ? "enable" : "disable";
+        if (!confirm(`Are you sure you want to ${action} this user?`)) return;
+
+        try {
+            await api.updateUser(user.id, { isDisabled: !user.isDisabled });
+            fetchUsers();
+        } catch (error) {
+            console.error(`Failed to ${action} user:`, error);
+            alert(`Failed to ${action} user: ` + error.message);
+        }
+    };
+
     const handleDelete = async (id) => {
         if (!confirm("Delete this user?")) return;
         try {
@@ -154,6 +167,7 @@ export default function UsersPage() {
                                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Email</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Role</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Vehicle</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Status</th>
                                 <th className="px-4 py-3 text-center text-xs font-medium uppercase text-slate-500">Actions</th>
                             </tr>
                         </thead>
@@ -182,14 +196,26 @@ export default function UsersPage() {
                                         <td className="px-4 py-3 text-sm text-slate-900">
                                             {assignedVehicle ? assignedVehicle.vehicleName : "-"}
                                         </td>
+                                        <td className="px-4 py-3">
+                                            <span className={`text-xs px-2 py-1 rounded ${user.isDisabled ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                {user.isDisabled ? 'Disabled' : 'Active'}
+                                            </span>
+                                        </td>
                                         <td className="px-4 py-3 text-center">
                                             <div className="flex items-center justify-center gap-2">
-                                                <button className="text-sky-600 hover:text-sky-700">
+                                                <button
+                                                    onClick={() => handleToggleStatus(user)}
+                                                    className={`p-1.5 rounded transition-colors ${user.isDisabled ? 'text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:bg-amber-50'}`}
+                                                    title={user.isDisabled ? "Enable User" : "Disable User"}
+                                                >
+                                                    <Shield size={14} className={user.isDisabled ? "opacity-50" : ""} />
+                                                </button>
+                                                <button className="text-sky-600 hover:text-sky-700 p-1.5 rounded hover:bg-slate-100">
                                                     <Edit size={14} />
                                                 </button>
                                                 <button
                                                     onClick={() => handleDelete(user.id)}
-                                                    className="text-rose-600 hover:text-rose-700"
+                                                    className="text-rose-600 hover:text-rose-700 p-1.5 rounded hover:bg-rose-50"
                                                 >
                                                     <Trash2 size={14} />
                                                 </button>

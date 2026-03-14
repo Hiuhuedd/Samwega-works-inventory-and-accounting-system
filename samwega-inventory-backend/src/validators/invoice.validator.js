@@ -29,10 +29,9 @@ const createInvoiceSchema = Joi.object({
 
     totalAmount: Joi.number()
         .positive()
-        .required()
+        .optional()
         .messages({
-            'number.positive': 'Total amount must be positive',
-            'any.required': 'Total amount is required'
+            'number.positive': 'Total amount must be positive'
         }),
 
     taxAmount: Joi.number()

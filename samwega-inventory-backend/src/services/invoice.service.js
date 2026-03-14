@@ -37,9 +37,10 @@ class InvoiceService {
 
             const data = {
                 ...invoiceData,
+                totalAmount: invoiceData.totalAmount || 0,
                 itemsTotal: 0, // Will be updated as items are linked
                 itemsCount: 0, // Number of linked items
-                balanceRemaining: invoiceData.totalAmount - (invoiceData.amountPaid || 0),
+                balanceRemaining: (invoiceData.totalAmount || 0) - (invoiceData.amountPaid || 0),
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             };
@@ -77,15 +78,10 @@ class InvoiceService {
         try {
             const invoice = await this.getInvoiceById(invoiceId);
 
-            const newItemsTotal = invoice.itemsTotal + itemCost;
+            const newItemsTotal = (invoice.itemsTotal || 0) + itemCost;
 
-            // Validate that items total doesn't exceed invoice total
-            if (newItemsTotal > invoice.totalAmount + 0.01) { // Allow 1 cent tolerance
-                throw new ValidationError(
-                    `Adding this item (${itemCost}) would exceed invoice total. ` +
-                    `Current items total: ${invoice.itemsTotal}, Invoice total: ${invoice.totalAmount}`
-                );
-            }
+            // No longer strict validate that items total doesn't exceed invoice total
+            // as requested to remove this feature.
 
             await this.db.collection(this.collection).doc(invoiceId).update({
                 itemsTotal: newItemsTotal,

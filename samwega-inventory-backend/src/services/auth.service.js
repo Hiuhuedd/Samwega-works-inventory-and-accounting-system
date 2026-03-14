@@ -136,6 +136,11 @@ class AuthService {
                 throw new AuthenticationError('Account not verified. Please contact administrator.');
             }
 
+            // Check if user is disabled
+            if (userData.isDisabled) {
+                throw new AuthenticationError('Account disabled. Please contact administrator.');
+            }
+
             // Generate JWT token
             const token = this.generateToken(userRecord.uid, email, userData.role);
 
@@ -389,7 +394,7 @@ class AuthService {
                 throw new NotFoundError('User');
             }
 
-            const allowedFields = ['username', 'fullName', 'phone', 'phoneNumber', 'role'];
+            const allowedFields = ['username', 'fullName', 'phone', 'phoneNumber', 'role', 'isDisabled'];
             const updates = {};
 
             // Handle standard fields

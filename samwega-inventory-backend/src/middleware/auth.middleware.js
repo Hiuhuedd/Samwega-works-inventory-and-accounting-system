@@ -41,6 +41,11 @@ const verifyToken = async (req, res, next) => {
 
         const userData = userDoc.data();
 
+        // Check if user is disabled
+        if (userData.isDisabled) {
+            throw new AuthenticationError('Account disabled. Please contact administrator.');
+        }
+
         // Attach user to request
         req.user = {
             uid: decodedToken.uid,
