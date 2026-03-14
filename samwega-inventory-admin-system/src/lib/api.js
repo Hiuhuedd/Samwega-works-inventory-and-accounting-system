@@ -119,7 +119,7 @@ class APIClient {
 
     async updateProfile(userData) {
         return this.request('/auth/me', {
-            method: 'PATCH',
+          method: 'PATCH',
             body: JSON.stringify(userData),
         });
     }
