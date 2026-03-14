@@ -110,7 +110,7 @@ export default function BulkAddItemPage() {
         productName: c.name,
         category: c.category || 'misc',
         buyingPrice: c.price,
-        sellingPrice: Math.round(c.price * 1.3),
+        sellingPrice: c.price,
         unit: 'PCS',
         stock: 0,
         isCatalog: true
