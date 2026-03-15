@@ -28,10 +28,10 @@ const createInvoiceSchema = Joi.object({
         .optional(),
 
     totalAmount: Joi.number()
-        .positive()
+        .min(0)
         .optional()
         .messages({
-            'number.positive': 'Total amount must be positive'
+            'number.min': 'Total amount must be zero or positive'
         }),
 
     taxAmount: Joi.number()
@@ -70,7 +70,7 @@ const updateInvoiceSchema = Joi.object({
     invoiceNumber: Joi.string().optional(),
     invoiceDate: Joi.date().iso().optional(),
     dueDate: Joi.date().iso().optional(),
-    totalAmount: Joi.number().positive().optional(),
+    totalAmount: Joi.number().min(0).optional(),
     taxAmount: Joi.number().min(0).optional(),
     discountAmount: Joi.number().min(0).optional(),
     paymentStatus: Joi.string().valid('pending', 'partial', 'paid').optional(),

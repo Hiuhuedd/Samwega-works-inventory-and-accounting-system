@@ -53,7 +53,7 @@ class InvoiceService {
             // Update supplier financial stats
             await supplierService.updateFinancialStats(
                 invoiceData.supplierId,
-                invoiceData.totalAmount,
+                invoiceData.totalAmount || 0,
                 invoiceData.amountPaid || 0
             );
 
