@@ -573,7 +573,6 @@ export default function BulkAddItemPage() {
                             placeholder="Item Name"
                             readOnly={item.isExisting}
                           />
-                          {item.isExisting && <span className="text-[10px] text-emerald-600 flex items-center gap-1 mt-0.5"><CheckCircle size={8} /> Existing</span>}
                         </td>
                         <td className="px-4 py-2">
                           <select
