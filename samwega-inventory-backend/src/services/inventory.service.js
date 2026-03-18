@@ -97,7 +97,7 @@ class InventoryService {
                 minPrice,
                 maxPrice,
                 page = 1,
-                limit = 20,
+                limit = 5000,
                 sortBy = 'createdAt',
                 sortOrder = 'desc'
             } = filters;

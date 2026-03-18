@@ -36,7 +36,7 @@ export default function InventoryReportPage() {
     const fetchInventory = async () => {
         try {
             setLoading(true);
-            const response = await api.getInventory({ limit: 1000 }); // Fetch all for report
+            const response = await api.getInventory({ limit: 5000 }); // Fetch all for report
             if (response.success) {
                 const data = response.data.items || response.data;
                 setItems(Array.isArray(data) ? data : []);
