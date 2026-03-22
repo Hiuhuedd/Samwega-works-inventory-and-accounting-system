@@ -27,6 +27,38 @@ class InventoryService {
                 await invoiceService.addItemToInvoice(itemData.invoiceId, itemCost);
             }
 
+            // Check for existing item with same name (and optionally same warehouse)
+            const nameLower = (itemData.productName || '').toLowerCase();
+            let existingQuery = this.db.collection(this.collection)
+                .where('productNameLower', '==', nameLower);
+            if (itemData.warehouseId) {
+                existingQuery = existingQuery.where('warehouseId', '==', itemData.warehouseId);
+            }
+            const existingSnap = await existingQuery.limit(1).get();
+
+            if (!existingSnap.empty) {
+                // Merge: add stock to existing item, update prices
+                const existingDoc = existingSnap.docs[0];
+                const existingData = existingDoc.data();
+                const addedStock = itemData.stock || 0;
+                const updates = {
+                    stock: (existingData.stock || 0) + addedStock,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                };
+                if (itemData.buyingPrice !== undefined) updates.buyingPrice = itemData.buyingPrice;
+                if (itemData.sellingPrice !== undefined) updates.sellingPrice = itemData.sellingPrice;
+                if (itemData.lastPurchaseInvoiceId || itemData.invoiceId) {
+                    updates.lastPurchaseInvoiceId = itemData.invoiceId || itemData.lastPurchaseInvoiceId;
+                }
+                await this.db.collection(this.collection).doc(existingDoc.id).update(updates);
+                logger.info(`Inventory item merged (stock added): ${itemData.productName}`, {
+                    id: existingDoc.id,
+                    addedStock
+                });
+                await cache.delPattern(`${this.cachePrefix}list:*`);
+                return await this.getItemById(existingDoc.id);
+            }
+
             const data = {
                 ...itemData,
                 productNameLower: (itemData.productName || '').toLowerCase(),
@@ -98,8 +130,8 @@ class InventoryService {
                 maxPrice,
                 page = 1,
                 limit = 5000,
-                sortBy = 'createdAt',
-                sortOrder = 'desc'
+                sortBy = 'productNameLower',
+                sortOrder = 'asc'
             } = filters;
 
             // Create cache key from filters
