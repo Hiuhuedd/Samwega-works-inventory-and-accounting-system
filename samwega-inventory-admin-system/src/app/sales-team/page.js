@@ -237,6 +237,23 @@ export default function SalesTeamPage() {
         }
     };
 
+    const assignVehicle = async (userId, vehicleId) => {
+        setUpdating(userId);
+        try {
+            const res = await api.assignVehicle(userId, vehicleId);
+            if (res.success) {
+                await fetchData();
+            } else {
+                alert(res.error || 'Failed to assign vehicle');
+            }
+        } catch (err) {
+            console.error('Error assigning vehicle:', err);
+            alert('Error assigning vehicle: ' + (err.message || 'Unknown error'));
+        } finally {
+            setUpdating(null);
+        }
+    };
+
     const getUnassignedVehicles = () => {
         const assignedVehicleIds = users.map(u => u.assignedVehicleId).filter(Boolean);
         return vehicles.filter(v => !assignedVehicleIds.includes(v.id));
