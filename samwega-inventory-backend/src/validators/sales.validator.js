@@ -388,6 +388,21 @@ const deleteBatchSchema = Joi.object({
         })
 });
 
+/**
+ * Update item validation schema
+ */
+const updateItemSchema = Joi.object({
+    quantity: Joi.number()
+        .integer()
+        .positive()
+        .optional(),
+    unitPrice: Joi.number()
+        .positive()
+        .optional()
+}).min(1).messages({
+    'object.min': 'At least one of quantity or unitPrice must be provided'
+});
+
 module.exports = {
     createSaleSchema,
     updateSaleSchema,
@@ -398,5 +413,6 @@ module.exports = {
     saleItemSchema,
     paymentSchema,
     findCombinationSchema,
-    deleteBatchSchema
+    deleteBatchSchema,
+    updateItemSchema
 };

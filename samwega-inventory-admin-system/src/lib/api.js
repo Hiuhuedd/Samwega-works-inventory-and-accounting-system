@@ -119,7 +119,7 @@ class APIClient {
 
     async updateProfile(userData) {
         return this.request('/auth/me', {
-          method: 'PATCH',
+            method: 'PATCH',
             body: JSON.stringify(userData),
         });
     }
@@ -758,6 +758,13 @@ class APIClient {
         return this.request('/debt/enrich-sales', {
             method: 'POST',
             body: JSON.stringify({ saleIds }),
+        });
+    }
+
+    async updateSaleItem(saleId, itemIndex, updates) {
+        return this.request(`/sales/${saleId}/items/${itemIndex}`, {
+            method: 'PATCH',
+            body: JSON.stringify(updates),
         });
     }
 }

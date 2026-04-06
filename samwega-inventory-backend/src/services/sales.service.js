@@ -1157,7 +1157,152 @@ class SalesService {
             throw error;
         }
     }
-}
 
+    /**
+     * Update quantity and/or price of an item in a sale
+     * @param {string} saleId
+     * @param {number} itemIndex
+     * @param {object} updates { quantity, unitPrice }
+     * @param {string} userId
+     */
+    async updateSaleItem(saleId, itemIndex, updates, userId) {
+        try {
+            const sale = await this.getSaleById(saleId);
+
+            if (sale.status === 'voided') {
+                throw new ValidationError('Cannot update item in a voided sale');
+            }
+
+            if (!sale.items || !sale.items[itemIndex]) {
+                throw new ValidationError('Item index out of bounds');
+            }
+
+            const item = sale.items[itemIndex];
+            const oldQuantity = Number(item.quantity || 0);
+            const newQuantity = updates.quantity !== undefined ? Number(updates.quantity) : oldQuantity;
+            const delta = newQuantity - oldQuantity;
+
+            const oldUnitPrice = Number(item.unitPrice || 0);
+            const newUnitPrice = updates.unitPrice !== undefined ? Number(updates.unitPrice) : oldUnitPrice;
+
+            const oldTotalPrice = Number(item.totalPrice || 0);
+            const newTotalPrice = newQuantity * newUnitPrice;
+            const priceDiff = newTotalPrice - oldTotalPrice;
+
+            // Recalculate profit for the item
+            const costPrice = Number(item.costPrice || 0);
+            const newProfit = (newUnitPrice - costPrice) * newQuantity;
+
+            // Prepare inventory update (only if quantity changed)
+            let vehicleInventoryRef = null;
+            if (delta !== 0) {
+                const vehicleInventorySnapshot = await this.db.collection('vehicle_inventory')
+                    .where('vehicleId', '==', sale.vehicleId)
+                    .where('inventoryId', '==', item.inventoryId)
+                    .limit(1)
+                    .get();
+
+                if (vehicleInventorySnapshot.empty) {
+                    throw new ValidationError(`Product ${item.productName} not found in vehicle inventory`);
+                }
+                vehicleInventoryRef = vehicleInventorySnapshot.docs[0].ref;
+            }
+
+            // Core transaction
+            await this.db.runTransaction(async (transaction) => {
+                // READ PHASE
+                const saleRef = this.db.collection(this.collection).doc(saleId);
+                let vehicleInvDoc = null;
+                if (vehicleInventoryRef) {
+                    vehicleInvDoc = await transaction.get(vehicleInventoryRef);
+                }
+
+                const saleDateISO = sale.saleDate;
+                const saleDateObj = saleDateISO ? new Date(saleDateISO) : new Date();
+                const saleDateStr = saleDateObj.toISOString().split('T')[0];
+                const summaryRef = this.db.collection('daily_sales_summary').doc(`${sale.vehicleId}_${saleDateStr}`);
+                const summaryDoc = await transaction.get(summaryRef);
+
+                // WRITE PHASE
+                // 1. Update vehicle inventory (if quantity changed)
+                if (vehicleInvDoc && vehicleInvDoc.exists) {
+                    const invData = vehicleInvDoc.data();
+                    const updatedLayers = (invData.layers || []).map(l => {
+                        if (l.layerIndex === item.layerIndex) {
+                            return {
+                                ...l,
+                                quantity: l.quantity - delta,
+                                soldStock: (l.soldStock || 0) + delta
+                            };
+                        }
+                        return l;
+                    });
+                    transaction.update(vehicleInventoryRef, {
+                        layers: updatedLayers,
+                        lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+
+                // 2. Update sale document
+                const updatedItems = [...sale.items];
+                updatedItems[itemIndex] = {
+                    ...item,
+                    quantity: newQuantity,
+                    unitPrice: newUnitPrice,
+                    totalPrice: newTotalPrice,
+                    profit: newProfit
+                };
+
+                const newSubtotal = Number(sale.subtotal || 0) + priceDiff;
+                const newGrandTotal = Number(sale.grandTotal || 0) + priceDiff;
+
+                const saleUpdates = {
+                    items: updatedItems,
+                    subtotal: newSubtotal,
+                    grandTotal: newGrandTotal,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                };
+
+                transaction.update(saleRef, saleUpdates);
+
+                // 3. Update daily summary
+                if (summaryDoc.exists) {
+                    const method = (sale.paymentMethod || 'cash').toLowerCase();
+                    const key = `${method === 'debt' ? 'credit' : (method === 'mixed' ? 'mixed' : method)}Sales`;
+
+                    transaction.update(summaryRef, {
+                        totalSales: admin.firestore.FieldValue.increment(priceDiff),
+                        [key]: admin.firestore.FieldValue.increment(priceDiff),
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+
+                // 4. Update customer stats
+                if (sale.customerId) {
+                    const customerRef = this.db.collection('customers').doc(sale.customerId);
+                    transaction.update(customerRef, {
+                        totalPurchases: admin.firestore.FieldValue.increment(priceDiff),
+                        totalDebt: (sale.paymentMethod === 'credit' || sale.paymentMethod === 'debt')
+                            ? admin.firestore.FieldValue.increment(priceDiff)
+                            : admin.firestore.FieldValue.increment(0),
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+            });
+
+            // Invalidate cache
+            await cache.del(`${this.cachePrefix}${saleId}`);
+            await cache.delPattern(`${this.cachePrefix}list:*`);
+            if (delta !== 0) {
+                await cache.delPattern(`vehicle:inventory:${sale.vehicleId}*`);
+            }
+
+            return await this.getSaleById(saleId);
+        } catch (error) {
+            logger.error('Update sale item error:', error);
+            throw error;
+        }
+    }
+}
 
 module.exports = new SalesService();

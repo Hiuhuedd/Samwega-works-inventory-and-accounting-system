@@ -169,6 +169,21 @@ const deleteSale = async (req, res) => {
     }
 };
 
+/**
+ * Update sale item quantity and/or price
+ */
+const updateSaleItem = async (req, res) => {
+    try {
+        const { id, itemIndex } = req.params;
+        const { quantity, unitPrice } = req.body;
+        const result = await salesService.updateSaleItem(id, parseInt(itemIndex), { quantity, unitPrice }, req.user.uid);
+        return res.status(200).json(successResponse(result, 'Item updated successfully'));
+    } catch (error) {
+        logger.error('Update sale item controller error:', error);
+        return res.status(error.statusCode || 500).json(errorResponse(error.message, error.details));
+    }
+};
+
 module.exports = {
     createSale,
     getAllSales,
@@ -180,6 +195,7 @@ module.exports = {
     findCombination,
     deleteBatch,
     deleteSale,
-    linkDebt
+    linkDebt,
+    updateSaleItem
 };
 

@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const Joi = require('joi');
 const salesController = require('../controllers/sales.controller');
 const { verifyToken, requireRole, requireVerified, logActivity } = require('../middleware/auth.middleware');
 const { writeLimiter } = require('../middleware/rateLimit.middleware');
@@ -171,6 +172,25 @@ router.patch(
     verifyToken,
     requireVerified,
     salesController.linkDebt
+);
+
+/**
+ * @route   PATCH /api/v1/sales/:id/items/:itemIndex
+ * @desc    Update item quantity and/or price in a sale
+ * @access  Admin, Store Manager
+ */
+router.patch(
+    '/:id/items/:itemIndex',
+    verifyToken,
+    requireRole('admin', 'store_manager'),
+    logActivity('UPDATE_ITEM', 'sale'),
+    writeLimiter,
+    validateParams(Joi.object({
+        id: Joi.string().required(),
+        itemIndex: Joi.number().integer().min(0).required()
+    })),
+    validateBody(require('../validators/sales.validator').updateItemSchema),
+    salesController.updateSaleItem
 );
 
 module.exports = router;

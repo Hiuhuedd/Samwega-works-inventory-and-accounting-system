@@ -176,6 +176,10 @@ export default function SalesDashboard() {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [selectedSales, setSelectedSales] = useState([]);
 
+    // Edit Item state
+    const [editingItem, setEditingItem] = useState(null); // { saleId, itemIndex, field, value }
+    const [isUpdatingQty, setIsUpdatingQty] = useState(false);
+
     // ── Fetch ────────────────────────────────────────────────────────────────
 
     useEffect(() => { fetchVehicles(); }, []);
@@ -300,7 +304,9 @@ export default function SalesDashboard() {
             const receiptNumber = sale.receiptNumber || `#${sale.id?.substring(0, 8)}`;
             const date = convertTimestamp(sale.saleDate);
 
-            for (const item of sale.items || []) {
+            const items = sale.items || [];
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
                 const qty = Number(item.quantity || item.qty || 0);
                 const buyingPrice = Number(item.buyingPrice || item.costPrice || item.cost || 0);
                 const sellingPrice = Number(item.sellingPrice || item.unitPrice || item.price || 0);
@@ -310,6 +316,7 @@ export default function SalesDashboard() {
 
                 rows.push({
                     saleId: sale.id,
+                    itemIndex: i,
                     date,
                     vehicleName: vehicle?.vehicleName || "-",
                     customerName,
@@ -547,6 +554,34 @@ export default function SalesDashboard() {
         setDebtFilter(false);
         setWalletFilter("");
         setSearch("");
+    };
+
+    const handleItemUpdate = async () => {
+        if (!editingItem || isUpdatingQty) return;
+
+        const { saleId, itemIndex, field, value } = editingItem;
+        const newValue = parseFloat(value);
+
+        if (isNaN(newValue) || newValue <= 0) {
+            setEditingItem(null);
+            return;
+        }
+
+        try {
+            setIsUpdatingQty(true);
+            const payload = { [field === 'qty' ? 'quantity' : 'unitPrice']: newValue };
+            const res = await api.updateSaleItem(saleId, itemIndex, payload);
+            if (res.success) {
+                // Refresh data to reflect changes
+                fetchData();
+                setEditingItem(null);
+            }
+        } catch (err) {
+            console.error(`Failed to update ${field}:`, err);
+            alert(err.message || `Failed to update ${field}`);
+        } finally {
+            setIsUpdatingQty(false);
+        }
     };
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -937,50 +972,116 @@ export default function SalesDashboard() {
                                                     <td colSpan={11} className="px-4 py-12 text-center text-slate-400">No data found.</td>
                                                 </tr>
                                             ) : (
-                                                filteredPnlRows.map((row, idx) => (
-                                                    <tr
-                                                        key={`${row.saleId}-${idx}`}
-                                                        className="hover:bg-slate-50 transition-colors cursor-pointer"
-                                                        onClick={() => router.push(`/sales/${row.saleId}`)}
-                                                    >
-                                                        <td className="px-4 py-2.5 whitespace-nowrap text-slate-600 text-xs">
-                                                            {row.date?.toLocaleDateString() || "—"}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 whitespace-nowrap text-slate-700">
-                                                            {row.vehicleName}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 whitespace-nowrap text-slate-700 max-w-[140px] truncate">
-                                                            {row.customerName}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 whitespace-nowrap font-mono text-slate-500 text-xs">
-                                                            <div>{row.receiptNumber}</div>
-                                                            {sales.find(s => s.id === row.saleId)?.isEtr && (
-                                                                <div className="text-[8px] bg-sky-50 text-sky-600 font-bold px-1 rounded w-fit mt-0.5 uppercase">ETR</div>
-                                                            )}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 text-slate-900 font-medium max-w-[180px] truncate" title={row.productName}>
-                                                            {row.productName}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
-                                                            {fmtInt(row.qty)}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
-                                                            {fmt(row.buyingPrice)}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
-                                                            {fmt(row.totalCost)}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
-                                                            {fmt(row.sellingPrice)}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
-                                                            {fmt(row.totalIncome)}
-                                                        </td>
-                                                        <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
-                                                            {fmt(row.margin)}
-                                                        </td>
-                                                    </tr>
-                                                ))
+                                                filteredPnlRows.map((row, idx) => {
+                                                    const isEditing = editingItem?.saleId === row.saleId && editingItem?.itemIndex === row.itemIndex;
+
+                                                    return (
+                                                        <tr
+                                                            key={`${row.saleId}-${row.itemIndex}`}
+                                                            className={`hover:bg-slate-50 transition-colors cursor-pointer ${isEditing ? "bg-sky-50" : ""}`}
+                                                            onClick={() => !isEditing && router.push(`/sales/${row.saleId}`)}
+                                                        >
+                                                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-600 text-xs">
+                                                                {row.date?.toLocaleDateString() || "—"}
+                                                            </td>
+                                                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-700">
+                                                                {row.vehicleName}
+                                                            </td>
+                                                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-700 max-w-[140px] truncate">
+                                                                {row.customerName}
+                                                            </td>
+                                                            <td className="px-4 py-2.5 whitespace-nowrap font-mono text-slate-500 text-xs">
+                                                                <div>{row.receiptNumber}</div>
+                                                                {sales.find(s => s.id === row.saleId)?.isEtr && (
+                                                                    <div className="text-[8px] bg-sky-50 text-sky-600 font-bold px-1 rounded w-fit mt-0.5 uppercase">ETR</div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-2.5 text-slate-900 font-medium max-w-[180px] truncate" title={row.productName}>
+                                                                {row.productName}
+                                                            </td>
+                                                            <td
+                                                                className="px-4 py-2.5 text-right text-slate-700 font-mono"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (!isUpdatingQty) {
+                                                                        setEditingItem({ saleId: row.saleId, itemIndex: row.itemIndex, field: 'qty', value: row.qty });
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {editingItem?.saleId === row.saleId && editingItem?.itemIndex === row.itemIndex && editingItem?.field === 'qty' ? (
+                                                                    <div className="flex justify-end items-center gap-1">
+                                                                        <input
+                                                                            type="number"
+                                                                            autoFocus
+                                                                            value={editingItem.value}
+                                                                            onChange={(e) => setEditingItem({ ...editingItem, value: e.target.value })}
+                                                                            onKeyDown={(e) => {
+                                                                                if (e.key === 'Enter') handleItemUpdate();
+                                                                                if (e.key === 'Escape') setEditingItem(null);
+                                                                            }}
+                                                                            className="w-16 px-1.5 py-0.5 border border-sky-400 rounded text-right focus:outline-none"
+                                                                            disabled={isUpdatingQty}
+                                                                        />
+                                                                        {isUpdatingQty && (
+                                                                            <div className="h-3 w-3 animate-spin rounded-full border-2 border-slate-200 border-t-sky-500" />
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="group flex justify-end items-center gap-1.5 cursor-text hover:text-sky-600">
+                                                                        {fmtInt(row.qty)}
+                                                                        <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
+                                                                {fmt(row.buyingPrice)}
+                                                            </td>
+                                                            <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
+                                                                {fmt(row.totalCost)}
+                                                            </td>
+                                                            <td
+                                                                className="px-4 py-2.5 text-right text-slate-700 font-mono"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (!isUpdatingQty) {
+                                                                        setEditingItem({ saleId: row.saleId, itemIndex: row.itemIndex, field: 'sellingPrice', value: row.sellingPrice });
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {editingItem?.saleId === row.saleId && editingItem?.itemIndex === row.itemIndex && editingItem?.field === 'sellingPrice' ? (
+                                                                    <div className="flex justify-end items-center gap-1">
+                                                                        <input
+                                                                            type="number"
+                                                                            autoFocus
+                                                                            value={editingItem.value}
+                                                                            onChange={(e) => setEditingItem({ ...editingItem, value: e.target.value })}
+                                                                            onKeyDown={(e) => {
+                                                                                if (e.key === 'Enter') handleItemUpdate();
+                                                                                if (e.key === 'Escape') setEditingItem(null);
+                                                                            }}
+                                                                            className="w-24 px-1.5 py-0.5 border border-sky-400 rounded text-right focus:outline-none"
+                                                                            disabled={isUpdatingQty}
+                                                                        />
+                                                                        {isUpdatingQty && (
+                                                                            <div className="h-3 w-3 animate-spin rounded-full border-2 border-slate-200 border-t-sky-500" />
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="group flex justify-end items-center gap-1.5 cursor-text hover:text-sky-600">
+                                                                        {fmt(row.sellingPrice)}
+                                                                        <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
+                                                                {fmt(row.totalIncome)}
+                                                            </td>
+                                                            <td className="px-4 py-2.5 text-right text-slate-700 font-mono">
+                                                                {fmt(row.margin)}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })
                                             )}
                                         </tbody>
                                     </table>
