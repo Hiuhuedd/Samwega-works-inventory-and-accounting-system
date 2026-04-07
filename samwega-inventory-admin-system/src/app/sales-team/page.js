@@ -240,7 +240,9 @@ export default function SalesTeamPage() {
     const assignVehicle = async (userId, vehicleId) => {
         setUpdating(userId);
         try {
-            const res = await api.assignVehicle(userId, vehicleId);
+            // Convert empty string to null for unassignment
+            const finalVehicleId = vehicleId || null;
+            const res = await api.assignVehicle(userId, finalVehicleId);
             if (res.success) {
                 await fetchData();
             } else {

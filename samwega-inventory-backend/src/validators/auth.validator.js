@@ -80,7 +80,7 @@ const verifyUserSchema = Joi.object({
  */
 const assignVehicleSchema = Joi.object({
     vehicleId: Joi.string()
-        .allow(null)
+        .allow(null, '')
         .optional()
         .messages({
             'string.base': 'Vehicle ID must be a string or null'
