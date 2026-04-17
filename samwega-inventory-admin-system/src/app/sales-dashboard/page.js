@@ -13,7 +13,8 @@ import {
     CreditCard,
     CheckCircle,
     Clock,
-    AlertCircle
+    AlertCircle,
+    Activity
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { collection, query, where, getDocs } from "firebase/firestore";
@@ -161,8 +162,7 @@ export default function SalesDashboard() {
 
     // Filters (shared between both views)
     const [selectedVehicle, setSelectedVehicle] = useState("");
-    const [startDate, setStartDate] = useState("");
-    const [endDate, setEndDate] = useState("");
+    const [selectedDate, setSelectedDate] = useState("");
     const [etrFilter, setEtrFilter] = useState("");
     const [debtFilter, setDebtFilter] = useState(false);
     const [debtEnrichment, setDebtEnrichment] = useState({});
@@ -183,7 +183,7 @@ export default function SalesDashboard() {
     // ── Fetch ────────────────────────────────────────────────────────────────
 
     useEffect(() => { fetchVehicles(); }, []);
-    useEffect(() => { fetchData(); }, [selectedVehicle, startDate, endDate, etrFilter, debtFilter]);
+    useEffect(() => { fetchData(); }, [selectedVehicle, selectedDate, etrFilter, debtFilter]);
 
     const fetchVehicles = async () => {
         try {
@@ -197,9 +197,9 @@ export default function SalesDashboard() {
         setLoading(true);
         try {
             const filters = {};
-            if (startDate && endDate) {
-                filters.startDate = startDate;
-                filters.endDate = endDate;
+            if (selectedDate) {
+                filters.startDate = selectedDate;
+                filters.endDate = selectedDate;
                 filters.type = "custom";
             } else {
                 filters.type = "all";
@@ -229,6 +229,9 @@ export default function SalesDashboard() {
             } else if (salesData.success && Array.isArray(salesData.data)) {
                 fetchedSales = salesData.data;
             }
+
+            // Exclude voided sales from dashboard view
+            fetchedSales = fetchedSales.filter(s => s.status !== 'voided');
 
             setSales(fetchedSales);
 
@@ -548,8 +551,7 @@ export default function SalesDashboard() {
 
     const resetFilters = () => {
         setSelectedVehicle("");
-        setStartDate("");
-        setEndDate("");
+        setSelectedDate("");
         setEtrFilter("");
         setDebtFilter(false);
         setWalletFilter("");
@@ -615,6 +617,15 @@ export default function SalesDashboard() {
                                 </button>
                             )}
 
+                            {/* View Voided Sales Link */}
+                            <button
+                                onClick={() => router.push('/voided-sales')}
+                                className="flex items-center gap-2 bg-white text-slate-600 px-3 py-1.5 rounded border border-slate-200 text-sm font-medium hover:bg-slate-50 transition-colors"
+                            >
+                                <Activity size={14} className="text-slate-400" />
+                                Reversed Sales
+                            </button>
+
                             {/* Vehicle filter */}
                             <div className="flex items-center gap-1 bg-white border border-slate-200 rounded px-3 py-1.5">
                                 <ChevronDown size={14} className="text-slate-400" />
@@ -674,24 +685,18 @@ export default function SalesDashboard() {
                                 </select>
                             </div>
 
-                            {/* Date range */}
+                            {/* Single Date Picker */}
                             <div className="flex items-center gap-1 bg-white border border-slate-200 rounded px-3 py-1.5 text-sm">
+                                <span className="text-slate-400 text-xs font-medium uppercase mr-1">Date:</span>
                                 <input
                                     type="date"
-                                    value={startDate}
-                                    onChange={(e) => setStartDate(e.target.value)}
-                                    className="bg-transparent border-none text-slate-700 focus:ring-0 cursor-pointer w-32"
-                                />
-                                <span className="text-slate-300">–</span>
-                                <input
-                                    type="date"
-                                    value={endDate}
-                                    onChange={(e) => setEndDate(e.target.value)}
-                                    className="bg-transparent border-none text-slate-700 focus:ring-0 cursor-pointer w-32"
+                                    value={selectedDate}
+                                    onChange={(e) => setSelectedDate(e.target.value)}
+                                    className="bg-transparent border-none text-slate-700 focus:ring-0 cursor-pointer w-40"
                                 />
                             </div>
 
-                            {(selectedVehicle || startDate || endDate || etrFilter || debtFilter || search) && (
+                            {(selectedVehicle || selectedDate || etrFilter || debtFilter || search) && (
                                 <button
                                     onClick={resetFilters}
                                     className="flex items-center gap-1 text-xs text-rose-500 font-medium hover:text-rose-700 bg-white border border-rose-200 rounded px-2 py-1.5"

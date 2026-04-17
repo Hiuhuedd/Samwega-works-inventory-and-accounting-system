@@ -113,7 +113,11 @@ const getDashboardSummary = async (filters = {}) => {
                 if (!issuedSeconds) continue;
                 const issuedMs = issuedSeconds * 1000;
                 if (filters.startDate && issuedMs < new Date(filters.startDate).getTime()) continue;
-                if (filters.endDate && issuedMs > new Date(filters.endDate).getTime()) continue;
+                if (filters.endDate) {
+                    const end = new Date(filters.endDate);
+                    end.setHours(23, 59, 59, 999);
+                    if (issuedMs > end.getTime()) continue;
+                }
             }
 
             debtCount++;

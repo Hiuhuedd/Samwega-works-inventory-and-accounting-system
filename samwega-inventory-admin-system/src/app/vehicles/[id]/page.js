@@ -108,7 +108,7 @@ export default function VehicleDetailsDashboard() {
   };
 
   const filteredTransfers = transfers.filter(t => isWithinDateRange(t.createdAt));
-  const filteredSales = sales.filter(s => isWithinDateRange(s.createdAt));
+  const filteredSales = sales.filter(s => s.status !== 'voided' && isWithinDateRange(s.createdAt));
   const filteredExpenses = expenses.filter(e => isWithinDateRange(e.createdAt));
 
   // Stats calculation

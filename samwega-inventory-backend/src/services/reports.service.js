@@ -596,7 +596,8 @@ class ReportsService {
             if (cached) return cached;
 
             let query = this.db.collection('sales')
-                .where('paymentMethod', '==', 'credit');
+                .where('paymentMethod', '==', 'credit')
+                .where('status', '==', 'completed');
 
             if (startDate) query = query.where('saleDate', '>=', new Date(startDate));
             if (endDate) query = query.where('saleDate', '<=', new Date(endDate));

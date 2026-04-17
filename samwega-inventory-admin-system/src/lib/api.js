@@ -307,7 +307,7 @@ class APIClient {
 
     async voidSale(id, reason) {
         return this.request(`/sales/${id}/void`, {
-            method: 'PUT',
+            method: 'POST',
             body: JSON.stringify({ reason }),
         });
     }

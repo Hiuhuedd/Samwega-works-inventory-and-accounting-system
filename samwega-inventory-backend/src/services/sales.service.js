@@ -492,7 +492,9 @@ class SalesService {
                     query = query.where('saleDate', '>=', new Date(startDate));
                 }
                 if (endDate) {
-                    query = query.where('saleDate', '<=', new Date(endDate));
+                    const end = new Date(endDate);
+                    end.setHours(23, 59, 59, 999);
+                    query = query.where('saleDate', '<=', end);
                 }
             }
 
@@ -530,6 +532,11 @@ class SalesService {
             // Get documents
             const snapshot = await query.get();
             let sales = serializeDocs(snapshot);
+
+            // Default exclusion of voided sales
+            if (!status) {
+                sales = sales.filter(sale => sale.status !== 'voided');
+            }
 
             // If we did DB-level limit
             if (minAmount === undefined && maxAmount === undefined && page === 1) {
@@ -708,6 +715,40 @@ class SalesService {
                     voidReason: reason,
                     updatedAt: admin.firestore.FieldValue.serverTimestamp()
                 });
+
+                // Update daily summary
+                const saleDateISO = sale.saleDate;
+                const saleDateObj = saleDateISO ? new Date(saleDateISO) : new Date();
+                const saleDateStr = saleDateObj.toISOString().split('T')[0];
+                const summaryRef = this.db.collection('daily_sales_summary').doc(`${sale.vehicleId}_${saleDateStr}`);
+                const summaryDoc = await transaction.get(summaryRef);
+
+                if (summaryDoc.exists) {
+                    let summaryMethod = (sale.paymentMethod || 'cash').toLowerCase();
+                    if (summaryMethod === 'debt') summaryMethod = 'credit';
+                    const key = `${summaryMethod}Sales`;
+                    const grandTotal = sale.grandTotal || 0;
+
+                    transaction.update(summaryRef, {
+                        totalSales: admin.firestore.FieldValue.increment(-grandTotal),
+                        totalTransactions: admin.firestore.FieldValue.increment(-1),
+                        [key]: admin.firestore.FieldValue.increment(-grandTotal),
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+
+                // Update customer stats
+                if (sale.customerId) {
+                    const customerRef = this.db.collection('customers').doc(sale.customerId);
+                    const grandTotal = sale.grandTotal || 0;
+                    const isCredit = sale.paymentMethod === 'credit' || sale.paymentMethod === 'debt';
+
+                    transaction.update(customerRef, {
+                        totalPurchases: admin.firestore.FieldValue.increment(-grandTotal),
+                        totalDebt: isCredit ? admin.firestore.FieldValue.increment(-grandTotal) : admin.firestore.FieldValue.increment(0),
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                }
             });
 
             logger.info(`Sale voided: ${sale.receiptNumber}`, { saleId, managerId, reason });
@@ -844,8 +885,10 @@ class SalesService {
                 }
 
                 if (startDate && endDate) {
+                    const end = new Date(endDate);
+                    end.setHours(23, 59, 59, 999);
                     salesQuery = salesQuery.where('saleDate', '>=', new Date(startDate))
-                        .where('saleDate', '<=', new Date(endDate));
+                        .where('saleDate', '<=', end);
                 } else if (type === 'daily' || type === 'today') {
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
