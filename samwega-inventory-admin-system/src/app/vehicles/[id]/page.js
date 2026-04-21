@@ -112,7 +112,15 @@ export default function VehicleDetailsDashboard() {
   const filteredExpenses = expenses.filter(e => isWithinDateRange(e.createdAt));
 
   // Aggregated Summary for the selected date range
-  const itemsSummary = Object.values(filteredTransfers.reduce((acc, t) => {
+  const salesSummary = filteredSales.reduce((acc, s) => {
+    (s.items || []).forEach(item => {
+      const productName = item.productName;
+      acc[productName] = (acc[productName] || 0) + (item.quantity || 0);
+    });
+    return acc;
+  }, {});
+
+  const itemsSummaryMap = filteredTransfers.reduce((acc, t) => {
     const isReturn = t.type === 'return' || t.status === 'returned';
 
     (t.items || []).forEach(item => {
@@ -124,14 +132,14 @@ export default function VehicleDetailsDashboard() {
         acc[productName] = {
           productName,
           totalQty: 0,
-          minPrice: invItem.minimumPrice || 0
+          soldQty: 0
         };
       }
 
       const totalItemQty = (item.layers || []).reduce((layerAcc, layer) => {
         const multiplier = calculateMultiplier(invItem.packagingStructure, layer.layerIndex);
         return layerAcc + ((layer.quantity || 0) * multiplier);
-      }, (item.quantity || 0)); // Fallback to item.quantity if no layers
+      }, (item.quantity || 0));
 
       if (isReturn) {
         acc[productName].totalQty -= totalItemQty;
@@ -140,7 +148,22 @@ export default function VehicleDetailsDashboard() {
       }
     });
     return acc;
-  }, {})).sort((a, b) => a.productName.localeCompare(b.productName));
+  }, {});
+
+  // Add sales to the summary and handle items only in sales
+  Object.keys(salesSummary).forEach(productName => {
+    if (!itemsSummaryMap[productName]) {
+      itemsSummaryMap[productName] = {
+        productName,
+        totalQty: 0,
+        soldQty: salesSummary[productName]
+      };
+    } else {
+      itemsSummaryMap[productName].soldQty = salesSummary[productName];
+    }
+  });
+
+  const itemsSummary = Object.values(itemsSummaryMap).sort((a, b) => a.productName.localeCompare(b.productName));
 
   const stats = {
     issued: filteredTransfers.reduce((acc, t) => {
@@ -243,9 +266,9 @@ export default function VehicleDetailsDashboard() {
       <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto no-scrollbar">
         <TabButton id="sales" label="Sales" icon={ShoppingCart} activeTab={activeTab} setActiveTab={setActiveTab} />
         <TabButton id="inventory" label="Vehicle Inventory" icon={Package} activeTab={activeTab} setActiveTab={setActiveTab} />
-        <TabButton id="summary" label="Issued Items Summary" icon={Info} activeTab={activeTab} setActiveTab={setActiveTab} />
         <TabButton id="expenses" label="Expenses" icon={Wallet} activeTab={activeTab} setActiveTab={setActiveTab} />
         <TabButton id="issuances" label="Issuances" icon={List} activeTab={activeTab} setActiveTab={setActiveTab} />
+        <TabButton id="summary" label="Issue/Sales Summary" icon={Info} activeTab={activeTab} setActiveTab={setActiveTab} />
       </div>
 
       {/* Tab Content */}
@@ -436,20 +459,25 @@ function SummaryTab({ summary }) {
         <tr>
           <th className="px-6 py-4 font-bold uppercase tracking-wider">Item Name</th>
           <th className="px-6 py-4 font-bold uppercase tracking-wider text-center">Net Issued Qty</th>
-          <th className="px-6 py-4 font-bold uppercase tracking-wider text-right">Min Selling Price</th>
-          <th className="px-6 py-4 font-bold uppercase tracking-wider text-right">Total (at Min Price)</th>
+          <th className="px-6 py-4 font-bold uppercase tracking-wider text-center">Sold Qty</th>
+          <th className="px-6 py-4 font-bold uppercase tracking-wider text-center">Variance</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-slate-100">
-        {summary.length > 0 ? summary.map((item, index) => (
-          <tr key={index} className="hover:bg-slate-50">
-            <td className="px-6 py-4 font-bold text-slate-900">{item.productName}</td>
-            <td className="px-6 py-4 text-center text-slate-600 font-mono font-bold">{item.totalQty.toLocaleString()}</td>
-            <td className="px-6 py-4 text-right text-slate-600 font-mono">KES {item.minPrice.toLocaleString()}</td>
-            <td className="px-6 py-4 text-right font-bold text-sky-700 font-mono">KES {(item.totalQty * item.minPrice).toLocaleString()}</td>
-          </tr>
-        )) : (
-          <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-400">No issuances found for this period.</td></tr>
+        {summary.length > 0 ? summary.map((item, index) => {
+          const variance = item.totalQty - item.soldQty;
+          return (
+            <tr key={index} className="hover:bg-slate-50">
+              <td className="px-6 py-4 font-bold text-slate-900">{item.productName}</td>
+              <td className="px-6 py-4 text-center text-slate-600 font-mono font-bold">{item.totalQty.toLocaleString()}</td>
+              <td className="px-6 py-4 text-center text-emerald-600 font-mono font-bold">{item.soldQty.toLocaleString()}</td>
+              <td className={`px-6 py-4 text-center font-mono font-bold ${variance < 0 ? 'text-rose-600' : variance > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                {variance > 0 ? `+${variance.toLocaleString()}` : variance.toLocaleString()}
+              </td>
+            </tr>
+          );
+        }) : (
+          <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-400">No data found for this period.</td></tr>
         )}
       </tbody>
       {summary.length > 0 && (
@@ -457,8 +485,8 @@ function SummaryTab({ summary }) {
           <tr>
             <td className="px-6 py-4 text-slate-900">Total</td>
             <td className="px-6 py-4 text-center text-slate-900">{summary.reduce((acc, curr) => acc + curr.totalQty, 0).toLocaleString()}</td>
-            <td className="px-6 py-4"></td>
-            <td className="px-6 py-4 text-right text-sky-800">KES {summary.reduce((acc, curr) => acc + (curr.totalQty * curr.minPrice), 0).toLocaleString()}</td>
+            <td className="px-6 py-4 text-center text-emerald-900">{summary.reduce((acc, curr) => acc + curr.soldQty, 0).toLocaleString()}</td>
+            <td className="px-6 py-4 text-center text-slate-900">{summary.reduce((acc, curr) => acc + (curr.totalQty - curr.soldQty), 0).toLocaleString()}</td>
           </tr>
         </tfoot>
       )}
