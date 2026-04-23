@@ -672,33 +672,71 @@ class SalesService {
             const managerData = managerDoc.data();
             const managerName = managerData.fullName || managerData.email;
 
-            // Begin transaction to restore inventory
+            // Prepare summary ref and date first
+            const saleDateISO = sale.saleDate;
+            const saleDateObj = saleDateISO ? new Date(saleDateISO) : new Date();
+            const saleDateStr = saleDateObj.toISOString().split('T')[0];
+            const summaryRef = this.db.collection('daily_sales_summary').doc(`${sale.vehicleId}_${saleDateStr}`);
+
+            // Pre-fetch all necessary inventory document references
+            // Group by inventoryId to handle multiple items per document
+            const inventoryGroups = new Map();
+            for (const item of sale.items) {
+                if (!inventoryGroups.has(item.inventoryId)) {
+                    inventoryGroups.set(item.inventoryId, { items: [], ref: null });
+                }
+                inventoryGroups.get(item.inventoryId).items.push(item);
+            }
+
+            for (const [inventoryId, group] of inventoryGroups.entries()) {
+                const vehicleInventoryQuery = await this.db.collection('vehicle_inventory')
+                    .where('vehicleId', '==', sale.vehicleId)
+                    .where('inventoryId', '==', inventoryId)
+                    .limit(1)
+                    .get();
+
+                if (!vehicleInventoryQuery.empty) {
+                    group.ref = vehicleInventoryQuery.docs[0].ref;
+                }
+            }
+
+            // Begin transaction to restore inventory and update status
             await this.db.runTransaction(async (transaction) => {
+                // 1. ALL READS FIRST
+                const summaryDoc = await transaction.get(summaryRef);
+
+                // Get all inventory docs at once
+                const validGroupEntries = Array.from(inventoryGroups.entries()).filter(([_, g]) => g.ref);
+                const inventorySnapshots = await Promise.all(
+                    validGroupEntries.map(([_, g]) => transaction.get(g.ref))
+                );
+
+                // 2. NOW ALL WRITES
+
                 // Restore vehicle inventory
-                for (const item of sale.items) {
-                    const vehicleInventoryQuery = await this.db.collection('vehicle_inventory')
-                        .where('vehicleId', '==', sale.vehicleId)
-                        .where('inventoryId', '==', item.inventoryId)
-                        .limit(1)
-                        .get();
+                for (let i = 0; i < validGroupEntries.length; i++) {
+                    const [inventoryId, group] = validGroupEntries[i];
+                    const inventoryDoc = inventorySnapshots[i];
 
-                    if (!vehicleInventoryQuery.empty) {
-                        const vehicleInventoryDoc = vehicleInventoryQuery.docs[0];
-                        const vehicleInventoryData = vehicleInventoryDoc.data();
-                        const layers = vehicleInventoryData.layers || [];
+                    if (inventoryDoc.exists) {
+                        const inventoryData = inventoryDoc.data();
+                        let updatedLayers = [...(inventoryData.layers || [])];
 
-                        const updatedLayers = layers.map(layer => {
-                            if (layer.layerIndex === item.layerIndex) {
-                                return {
-                                    ...layer,
-                                    quantity: layer.quantity + item.quantity,
-                                    soldStock: (layer.soldStock || 0) - item.quantity
-                                };
-                            }
-                            return layer;
-                        });
+                        // Process all items for this inventory document
+                        for (const item of group.items) {
+                            updatedLayers = updatedLayers.map(layer => {
+                                if (layer.layerIndex === item.layerIndex) {
+                                    return {
+                                        ...layer,
+                                        quantity: layer.quantity + item.quantity,
+                                        soldStock: (layer.soldStock || 0) - item.quantity
+                                    };
+                                }
+                                return layer;
+                            });
+                        }
 
-                        transaction.update(vehicleInventoryDoc.ref, {
+                        transaction.update(inventoryDoc.ref, {
                             layers: updatedLayers,
                             lastUpdated: admin.firestore.FieldValue.serverTimestamp()
                         });
@@ -717,12 +755,6 @@ class SalesService {
                 });
 
                 // Update daily summary
-                const saleDateISO = sale.saleDate;
-                const saleDateObj = saleDateISO ? new Date(saleDateISO) : new Date();
-                const saleDateStr = saleDateObj.toISOString().split('T')[0];
-                const summaryRef = this.db.collection('daily_sales_summary').doc(`${sale.vehicleId}_${saleDateStr}`);
-                const summaryDoc = await transaction.get(summaryRef);
-
                 if (summaryDoc.exists) {
                     let summaryMethod = (sale.paymentMethod || 'cash').toLowerCase();
                     if (summaryMethod === 'debt') summaryMethod = 'credit';
