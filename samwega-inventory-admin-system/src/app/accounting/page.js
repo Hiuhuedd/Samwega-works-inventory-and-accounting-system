@@ -32,8 +32,29 @@ export default function AccountingDashboard() {
     const [endDate, setEndDate] = useState(defaultRange.end);
 
     useEffect(() => {
-        fetchStats();
+        const checkAuth = async () => {
+            try {
+                const response = await api.getCurrentUser();
+                if (response.success) {
+                    if (response.data.role !== 'admin') {
+                        // Not an admin, show restricted message
+                        setAuthorized(false);
+                    } else {
+                        setAuthorized(true);
+                        fetchStats();
+                    }
+                }
+            } catch (err) {
+                console.error("Auth check failed:", err);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        checkAuth();
     }, [startDate, endDate]);
+
+    const [authorized, setAuthorized] = useState(null);
 
     const fetchStats = async () => {
         setLoading(true);
@@ -139,6 +160,14 @@ export default function AccountingDashboard() {
                         <div className="flex flex-col items-center justify-center py-24 space-y-4">
                             <div className="w-10 h-10 border-4 border-slate-200 border-t-violet-600 rounded-full animate-spin" />
                             <p className="text-slate-500 text-sm animate-pulse">Calculating performance...</p>
+                        </div>
+                    ) : authorized === false ? (
+                        <div className="flex flex-col items-center justify-center py-24 space-y-4">
+                            <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center text-rose-500">
+                                <AlertCircle size={32} />
+                            </div>
+                            <h2 className="text-xl font-bold text-slate-900">Access Restricted</h2>
+                            <p className="text-slate-500 text-sm">Only administrators can access the accounting dashboard.</p>
                         </div>
                     ) : (
                         <div className="transition-all duration-300">

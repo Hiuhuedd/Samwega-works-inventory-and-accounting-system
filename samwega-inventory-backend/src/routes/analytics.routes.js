@@ -71,7 +71,7 @@ router.get(
 router.get(
     '/profit',
     verifyToken,
-    requireRole('admin', 'accountant'),
+    requireRole('admin'),
     analyticsController.getProfitAnalytics
 );
 
@@ -83,7 +83,7 @@ router.get(
 router.get(
     '/accounting',
     verifyToken,
-    requireRole('admin', 'accountant'),
+    requireRole('admin'),
     analyticsController.getAccountingStats
 );
 

@@ -73,9 +73,9 @@ class SalesService {
             for (const item of items) {
                 const inventoryItem = await inventoryService.getItemById(item.inventoryId);
 
-                // Validate minimum selling price
+                // Validate minimum selling price - Skip for WORKSHOP vehicle
                 const minimumPrice = inventoryItem.sellingPrice || 0;
-                if (item.unitPrice < minimumPrice) {
+                if (vehicle.vehicleName !== 'WORKSHOP' && item.unitPrice < minimumPrice) {
                     throw new ValidationError(
                         `Price for ${item.productName} (${item.unitPrice}) is below minimum selling price (${minimumPrice})`
                     );

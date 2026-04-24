@@ -57,7 +57,7 @@ export default function Sidebar() {
         { name: "Suppliers", href: "/suppliers", icon: Users, roles: ["admin", "store_manager", "accountant"] },
         { name: "Invoices", href: "/invoices", icon: FileText, roles: ["admin", "store_manager", "accountant"] },
         { name: "Expenses", href: "/expenses", icon: Wallet, roles: ["admin", "store_manager", "accountant", "sales_rep"] },
-        { name: "Accounting", href: "/accounting", icon: Calculator, roles: ["admin", "store_manager", "accountant"] },
+        { name: "Accounting", href: "/accounting", icon: Calculator, roles: ["admin"] },
         { name: "Reversed Sales", href: "/voided-sales", icon: Activity, roles: ["admin", "store_manager", "accountant"] },
         { name: "Reports", href: "/reports", icon: BarChart, roles: ["admin", "store_manager", "accountant"] },
     ];
