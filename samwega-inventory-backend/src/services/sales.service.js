@@ -1001,8 +1001,13 @@ class SalesService {
                 targetSaleIds = salesSnapshot.docs.map(doc => doc.id);
             }
 
-            if (targetSaleIds.length > 0) {
-                // Fetch debt enrichment for these specific sales
+            // Smart Enrichment: Only fetch individual debt records for small sets or filtered views.
+            // For large "All Sales" datasets, the global summary is much more efficient.
+            const ENRICHMENT_THRESHOLD = 150;
+            const isFiltered = !!isEtrFilter || !!bankName;
+
+            if (targetSaleIds.length > 0 && (targetSaleIds.length <= ENRICHMENT_THRESHOLD || isFiltered)) {
+                // Fetch debt enrichment for these specific sales using the new batch endpoint
                 const enrichment = await debtService.getDebtsBySaleIds(targetSaleIds);
 
                 // Reset credit bucket and rebuild it from enrichment

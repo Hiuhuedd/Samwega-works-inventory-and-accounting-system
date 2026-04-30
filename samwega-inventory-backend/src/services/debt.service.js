@@ -30,6 +30,10 @@ const resolveDebtDisplayStatus = (debt) => {
     return 'unpaid'; // pending
 };
 
+// Simple in-memory cache for debt records
+const debtCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 /**
  * Fetch a single debt record by its Firestore document ID.
  * @param {string} debtId
@@ -37,9 +41,25 @@ const resolveDebtDisplayStatus = (debt) => {
  */
 const getDebtById = async (debtId) => {
     try {
+        // Check cache first
+        if (debtCache.has(debtId)) {
+            const cached = debtCache.get(debtId);
+            if (Date.now() - cached.timestamp < CACHE_TTL) {
+                return cached.data;
+            }
+            debtCache.delete(debtId);
+        }
+
         const response = await debtApi.get(`/debts/${debtId}`);
         const debt = response.data?.data || response.data;
-        return debt ? { ...debt, displayStatus: resolveDebtDisplayStatus(debt) } : null;
+        if (!debt) return null;
+
+        const enrichedDebt = { ...debt, displayStatus: resolveDebtDisplayStatus(debt) };
+        
+        // Update cache
+        debtCache.set(debtId, { data: enrichedDebt, timestamp: Date.now() });
+        
+        return enrichedDebt;
     } catch (error) {
         logger.warn(`[DebtService] Failed to fetch debt ${debtId}: ${error.message}`);
         return null;
@@ -48,28 +68,65 @@ const getDebtById = async (debtId) => {
 
 /**
  * Batch-fetch debt records by an array of debt IDs.
- * Runs requests in parallel (limited concurrency to avoid rate limits).
- * Returns a map: { debtId → debtRecord }
+ * Uses the new batch endpoint to reduce HTTP overhead by 99%.
  * @param {string[]} debtIds
- * @returns {Object}
+ * @returns {Object} Map: { debtId → debtRecord }
  */
 const getDebtsByIds = async (debtIds) => {
     if (!debtIds || debtIds.length === 0) return {};
 
     const uniqueIds = [...new Set(debtIds.filter(Boolean))];
-    const BATCH_SIZE = 10; // max concurrent requests
-
     const result = {};
+    const idsToFetch = [];
 
-    for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
-        const batch = uniqueIds.slice(i, i + BATCH_SIZE);
-        const promises = batch.map((id) => getDebtById(id).then((debt) => ({ id, debt })));
-        const settled = await Promise.allSettled(promises);
-        settled.forEach((item) => {
-            if (item.status === 'fulfilled' && item.value.debt) {
-                result[item.value.id] = item.value.debt;
+    // Check cache first
+    uniqueIds.forEach(id => {
+        if (debtCache.has(id)) {
+            const cached = debtCache.get(id);
+            if (Date.now() - cached.timestamp < CACHE_TTL) {
+                result[id] = cached.data;
+                return;
             }
-        });
+            debtCache.delete(id);
+        }
+        idsToFetch.push(id);
+    });
+
+    if (idsToFetch.length === 0) return result;
+
+    try {
+        logger.info(`[DebtService] Batch fetching ${idsToFetch.length} debts...`);
+        
+        // Fetch in chunks of 100 to avoid huge payloads
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < idsToFetch.length; i += CHUNK_SIZE) {
+            const chunk = idsToFetch.slice(i, i + CHUNK_SIZE);
+            const response = await debtApi.post('/debts/batch', { ids: chunk });
+            
+            const debts = response.data?.data || [];
+            debts.forEach(debt => {
+                if (debt && debt.id) {
+                    const enrichedDebt = { 
+                        ...debt, 
+                        displayStatus: resolveDebtDisplayStatus(debt) 
+                    };
+                    result[debt.id] = enrichedDebt;
+                    
+                    // Update cache
+                    debtCache.set(debt.id, { data: enrichedDebt, timestamp: Date.now() });
+                }
+            });
+        }
+    } catch (error) {
+        logger.error(`[DebtService] Batch fetch failed: ${error.message}`);
+        
+        // Fallback for small batches if the batch endpoint fails
+        if (idsToFetch.length < 5) {
+            for (const id of idsToFetch) {
+                const debt = await getDebtById(id);
+                if (debt) result[id] = debt;
+            }
+        }
     }
 
     return result;
